@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
+use tauri::Emitter;
 
 /// Forward error with upstream status code (0 = connection failure).
 type ForwardError = (String, u16);
@@ -60,6 +61,7 @@ pub async fn forward_with_retry(
         .unwrap_or_default();
 
     let mut last_error: Option<(String, u16)> = None;
+    let mut failover_count: usize = 0;
 
     for entry in entries {
         let start = Instant::now();
@@ -69,6 +71,7 @@ pub async fn forward_with_retry(
             let breakers = state.circuit_breakers.read().await;
             if let Some(cb) = breakers.get(&entry.id) {
                 if !cb.is_available() {
+                    failover_count += 1;
                     continue;
                 }
             }
@@ -78,6 +81,17 @@ pub async fn forward_with_retry(
             Ok(result) => {
                 let elapsed = start.elapsed();
                 record_circuit_success(state, &entry.id).await;
+
+                // Notify frontend if failover happened
+                if failover_count > 0 {
+                    let _ = state.app_handle.emit("proxy-failover", serde_json::json!({
+                        "requested_model": requested_model,
+                        "resolved_model": entry.model,
+                        "channel_name": entry.channel_name,
+                        "failover_count": failover_count,
+                        "skipped": failover_count,
+                    }));
+                }
 
                 if !is_stream {
                     let latency_ms = elapsed.as_millis() as i64;
@@ -108,17 +122,17 @@ pub async fn forward_with_retry(
                         entry.id
                     );
                     let _ = state.db.toggle_entry(&entry.id, false);
-                    return Err(ProxyError::Internal(e));
+                    return Err(ProxyError::Upstream { status, message: e });
                 }
 
                 // 504 and 524 are never retried (always return immediately)
                 if status == 504 || status == 524 {
-                    return Err(ProxyError::Internal(e));
+                    return Err(ProxyError::Upstream { status, message: e });
                 }
 
                 // Auto-disable: if status is in disable_codes, immediately fail
                 if disable_codes.contains(&status) {
-                    return Err(ProxyError::Internal(e));
+                    return Err(ProxyError::Upstream { status, message: e });
                 }
 
                 // Circuit breaker: trip on 5xx and connection failures
@@ -128,17 +142,24 @@ pub async fn forward_with_retry(
 
                 // Check retry: if status NOT in retry_codes, stop retrying
                 if !retry_codes.contains(&status) {
-                    return Err(ProxyError::Internal(e));
+                    return Err(ProxyError::Upstream { status, message: e });
                 }
 
                 last_error = Some((e, status));
+                failover_count += 1;
                 continue;
             }
         }
     }
 
     Err(last_error
-        .map(|(e, _)| ProxyError::Internal(e))
+        .map(|(e, status)| {
+            if status > 0 {
+                ProxyError::Upstream { status, message: e }
+            } else {
+                ProxyError::Internal(e)
+            }
+        })
         .unwrap_or(ProxyError::AllProvidersFailed))
 }
 
