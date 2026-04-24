@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { GripVertical, Plus, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -134,6 +135,16 @@ export function ApiPoolPage() {
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
+
+  // Listen for tray priority changes to refresh the list
+  useEffect(() => {
+    const unlisten = listen("tray-priority-changed", () => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [queryClient]);
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ["entries"],

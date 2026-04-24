@@ -6,7 +6,7 @@ mod proxy;
 use database::Database;
 use proxy::ProxyServer;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, CheckMenuItem, PredefinedMenuItem};
 
 pub use error::AppError;
@@ -17,6 +17,8 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
 }
+
+const TRAY_ID: &str = "api-switch-tray";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,25 +58,18 @@ pub fn run() {
             // Read settings to decide startup behavior
             let settings = app.state::<AppState>().db.get_settings().unwrap_or_default();
 
-            // Build tray menu
+            // Build tray icon (ref: cc-switch/src/lib.rs)
             let tray_menu = build_tray_menu(app.handle())?;
-
-            // Build tray icon
-            let _tray = tauri::tray::TrayIconBuilder::new()
+            let _tray = tauri::tray::TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&tray_menu)
-                .on_menu_event(move |_tray, event| {
-                    handle_menu_event(&event);
+                .show_menu_on_left_click(true)
+                .on_tray_icon_event(|_tray, event| match event {
+                    tauri::tray::TrayIconEvent::Click { .. } => {}
+                    _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
-                    // Double-click tray icon to show main window
-                    let id = event.id();
-                    if id.as_ref().is_empty() {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                .on_menu_event(move |app, event| {
+                    handle_tray_menu_event(app, &event.id.0);
                 })
                 .build(app)?;
 
@@ -83,6 +78,15 @@ pub fn run() {
                 if settings.start_minimized {
                     let _ = window.hide();
                 }
+
+                // Intercept window close → hide to tray instead of exiting
+                let win = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win.hide();
+                    }
+                });
             }
 
             log::info!("API Switch initialized");
@@ -127,55 +131,82 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .db.get_enabled_entries_for_routing()
         .unwrap_or_default();
     let top5: Vec<_> = entries.into_iter().take(5).collect();
-    let count = top5.len();
 
+    // 1. Show main window
+    let show_item = MenuItem::with_id(app, "show_main", "Show Main Window", true, None::<String>)?;
+    let separator1 = PredefinedMenuItem::separator(app)?;
+
+    // 2. CheckMenuItems for top 5 entries
     let check_items: Vec<CheckMenuItem<tauri::Wry>> = top5
         .iter()
         .enumerate()
         .map(|(i, entry)| {
-            let checked = i == 0 && entry.enabled;
-            CheckMenuItem::with_id(app, &entry.id, &entry.display_name, checked, true, None::<String>).unwrap()
+            let checked = i == 0;
+            CheckMenuItem::with_id(app, &entry.id, &entry.display_name, true, checked, None::<String>).unwrap()
         })
         .collect();
 
-    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(count + 2);
-    for item in &check_items {
-        all.push(item);
-    }
-    let separator = PredefinedMenuItem::separator(app)?;
+    // 3. Quit
+    let separator2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<String>)?;
 
-    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(count + 2);
+    // Assemble menu
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 4);
+    all.push(&show_item as &dyn tauri::menu::IsMenuItem<_>);
+    all.push(&separator1 as &dyn tauri::menu::IsMenuItem<_>);
     for item in &check_items {
         all.push(item);
     }
-    all.push(&separator as &dyn tauri::menu::IsMenuItem<_>);
+    all.push(&separator2 as &dyn tauri::menu::IsMenuItem<_>);
     all.push(&quit as &dyn tauri::menu::IsMenuItem<_>);
 
     Menu::with_items(app, &all)
 }
 
-fn handle_menu_event(event: &tauri::menu::MenuEvent) {
-    let id = event.id();
-    if id.as_ref() == "quit" {
-        std::process::exit(0);
-    } else {
-        let entry_id = id.as_ref();
-        let db_path = dirs::data_local_dir()
-            .unwrap_or_default()
-            .join("api-switch")
-            .join("api-switch.db");
+fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
+    log::info!("[tray] menu event: {event_id}");
 
-        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-            let now = chrono::Utc::now().timestamp();
-            let _ = conn.execute(
-                "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = ?1 WHERE id != ?2",
-                rusqlite::params![now, entry_id],
-            );
-            let _ = conn.execute(
-                "UPDATE api_entries SET sort_index = 0, updated_at = ?1 WHERE id = ?2",
-                rusqlite::params![now, entry_id],
-            );
+    match event_id {
+        "show_main" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        "quit" => {
+            app.exit(0);
+        }
+        _ => {
+            // Provider entry click — set as top priority
+            let entry_id = event_id.to_string();
+            log::info!("[tray] setting priority for entry={entry_id}");
+
+            // Update sort_index: set clicked entry to 0, increment others
+            {
+                let app_state = app.state::<AppState>();
+                let guard = app_state.db.conn.lock();
+                if let Ok(conn) = guard {
+                    let now = chrono::Utc::now().timestamp();
+                    let _ = conn.execute(
+                        "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = ?1 WHERE id != ?2",
+                        rusqlite::params![now, entry_id],
+                    );
+                    let _ = conn.execute(
+                        "UPDATE api_entries SET sort_index = 0, updated_at = ?1 WHERE id = ?2",
+                        rusqlite::params![now, entry_id],
+                    );
+                }
+            }
+
+            // Rebuild tray menu with updated priority
+            if let Ok(new_menu) = build_tray_menu(app) {
+                if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                    let _ = tray.set_menu(Some(new_menu));
+                }
+            }
+
+            // Notify frontend to refresh API Pool list
+            let _ = app.emit("tray-priority-changed", ());
         }
     }
 }

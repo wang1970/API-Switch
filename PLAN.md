@@ -299,8 +299,9 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [ ] **Azure deployment 验证**: Azure 适配器已实现完整 URL 路径 + api-key 认证 + 模型列表解析，待有 Azure 资源后端到端验证
 - [ ] **请求速率限制**: 当前无 RPM/TPM 限流，高并发下可能打爆上游
 - [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史
-- [ ] **系统托盘**: `Cargo.toml` 已启用 `tray-icon` feature，但未实现托盘菜单
-- [x] **系统托盘菜单**: 顶层平铺 5 个优先 API（CheckMenuItem），分隔线，退出。点击条目设为最高优先级。双击托盘图标弹出主窗口
+- [x] **系统托盘**: `TrayIconBuilder::with_id` 创建托盘，菜单含"打开主窗口"+ 5 个优先 API（CheckMenuItem）+ 退出
+- [x] **托盘优先级切换**: 点击 CheckMenuItem 更新 DB sort_index，重建菜单刷新勾选状态，`emit("tray-priority-changed")` 通知前端刷新 API Pool
+- [x] **关闭窗口隐藏到托盘**: 拦截 `CloseRequested`，`prevent_close()` + `hide()` 替代退出，退出仅通过托盘菜单 "Exit"
 - [x] **托盘设置**: 设置页新增"系统托盘"卡片，支持"跟随系统启动"和"启动最小化"开关
 - [x] **AppState Clone**: 支持 Clone 以便 TrayIconBuilder 闭包捕获
 
@@ -429,6 +430,22 @@ api-switch/
 
 ## 10. 变更日志
 
+### 2026-04-24 — 系统托盘完善（v0.1.5-dev）
+
+**改动文件**: 2 个文件，+91 行 / -49 行
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **托盘事件修复** | 参考 cc-switch 实现：用 `event.id.0` 取 MenuId 内部 String，`match` 分发 `show_main`/`quit`/provider 三类事件 |
+| 2 | **优先级切换完整链路** | 点击 CheckMenuItem → 更新 DB sort_index → `tray.set_menu()` 重建菜单 → `emit("tray-priority-changed")` 通知前端刷新 |
+| 3 | **关闭窗口隐藏到托盘** | 拦截 `WindowEvent::CloseRequested`，`api.prevent_close()` + `window.hide()`，退出仅通过托盘 "Exit" |
+| 4 | **托盘菜单结构优化** | 新增 "Show Main Window" 菜单项，`.show_menu_on_left_click(true)` 左键弹出菜单，`app.exit(0)` 替代 `process::exit(0)` |
+| 5 | **前端事件监听** | `ApiPoolPage` 监听 `tray-priority-changed` 事件，`invalidateQueries(["entries"])` 刷新列表排序 |
+
+**编译状态**: `cargo check` 0 errors | `pnpm typecheck` 0 errors | 92 tests passed
+
+---
+
 ### 2026-04-24 — Protocol 接入 + 测试对话 + 代理自启（v0.1.5-dev）
 
 **改动文件**: 13 个文件，+550 行 / -100 行
@@ -482,20 +499,6 @@ api-switch/
 | 5 | **模型 chip 修复** | 模型选择标签的 `×` 按钮改用 `&times;` HTML 实体修复显示问题 |
 
 **编译状态**: `cargo check` 0 errors | `pnpm typecheck` 0 errors
-
----
-
-### 2026-04-24 — 系统托盘 + 优先级切换（v0.1.5-dev）
-
-**改动文件**: 8 个文件，+120 行 / -30 行
-
-| # | 改动项 | 说明 |
-|---|--------|------|
-| 1 | **系统托盘** | `TrayIconBuilder` 构建托盘：图标 + 菜单 + 双击事件。顶层平铺 5 个优先 API（CheckMenuItem），点击设为最高优先级，分隔线 + 退出 |
-| 2 | **双击托盘弹出窗口** | `on_tray_icon_event` 处理，无 menu_id 时触发 `window.show()` |
-| 3 | **托盘设置** | 设置页新增"系统托盘"卡片：跟随系统启动（`autostart`）、启动最小化（`start_minimized`），默认均为 false |
-| 4 | **启动窗口逻辑** | 根据 `start_minimized` 决定是否隐藏窗口（不再无条件隐藏） |
-| 5 | **AppSettings 扩展** | 新增 `autostart: bool` + `start_minimized: bool` 字段，DB 读写已接入 |
 
 ---
 
