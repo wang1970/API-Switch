@@ -159,12 +159,15 @@
     "cards": {
       "todayRequests": "今日请求",
       "todayTokens": "今日 Tokens",
+      "todayPrompt": "今日输入",
+      "todayCompletion": "今日输出",
       "performance": "实时性能",
       "successRate": "成功率",
       "totalTokens": "累计 Tokens",
       "totalPrompt": "累计输入",
       "totalCompletion": "累计输出",
-      "avgLatency": "平均延迟"
+      "avgLatency": "平均延迟",
+      "total": "总计"
     },
     "charts": {
       "consumption": "Token 消耗分布",

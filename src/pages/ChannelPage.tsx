@@ -1,8 +1,8 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  Edit, Plus, RefreshCw, Save, Trash2, Link2, CheckSquare, Square, Eye, EyeOff,
+  Edit, Plus, RefreshCw, Save, Trash2, Link2, CheckSquare, Square, Eye, EyeOff, Power, PowerOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +58,6 @@ const defaultChannelForm = (): ChannelFormState => ({
 export function ChannelPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [keyword, setKeyword] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -76,18 +75,6 @@ export function ChannelPage() {
     },
   });
 
-  const filteredChannels = useMemo(() => {
-    if (!channels) return [];
-    const term = keyword.trim().toLowerCase();
-    if (!term) return channels;
-    return channels.filter((channel) => {
-      const haystack = [channel.name, channel.api_type, channel.base_url, channel.notes]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [channels, keyword]);
-
   if (isLoading) {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
   }
@@ -100,12 +87,6 @@ export function ChannelPage() {
           <p className="text-sm text-muted-foreground mt-1">{t("channel.description")}</p>
         </div>
         <div className="flex items-center gap-3">
-          <Input
-            className="w-72"
-            placeholder={t("channel.search")}
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-          />
           <Button
             size="sm"
             className="gap-1.5"
@@ -138,7 +119,7 @@ export function ChannelPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredChannels.map((channel) => (
+                {(channels || []).map((channel) => (
                   <ChannelRow
                     key={channel.id}
                     channel={channel}
@@ -157,7 +138,7 @@ export function ChannelPage() {
             </table>
           </div>
 
-          {!filteredChannels.length && (
+          {!(channels || []).length && (
             <div className="flex h-48 items-center justify-center text-muted-foreground">
               {t("common.noData")}
             </div>
@@ -202,6 +183,25 @@ function ChannelRow({
       setFetching(false);
       alert(`Fetch models failed: ${err}`);
     },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      updateChannel({ id: channel.id, enabled }),
+    onMutate: async (enabled) => {
+      await queryClient.cancelQueries({ queryKey: ["channels"] });
+      const previous = queryClient.getQueryData<Channel[]>(["channels"]);
+      queryClient.setQueryData<Channel[]>(["channels"], (old) =>
+        old?.map((c) => (c.id === channel.id ? { ...c, enabled } : c)),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["channels"], context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["channels"] }),
   });
 
   const selectMutation = useMutation({
@@ -271,15 +271,29 @@ function ChannelRow({
         </td>
         <td className="px-4 py-3 font-mono text-xs max-w-[320px] truncate">{channel.base_url}</td>
         <td className="px-4 py-3">
-          <span className={cn("text-xs", channel.enabled ? "text-green-600" : "text-muted-foreground")}>
+          <span className={cn(
+            "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
+            channel.enabled
+              ? "bg-green-100 text-green-700"
+              : "bg-muted text-muted-foreground",
+          )}>
             {channel.enabled ? t("channel.enabled") : t("channel.disabled")}
           </span>
         </td>
-        <td className="px-4 py-3">{selectedModels.length}</td>
+        <td className="px-4 py-3">{availableModels.length}</td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
               <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => toggleMutation.mutate(!channel.enabled)}
+              title={channel.enabled ? t("channel.disabled") : t("channel.enabled")}
+            >
+              {channel.enabled ? <Power className="h-4 w-4 text-green-600" /> : <PowerOff className="h-4 w-4 text-muted-foreground" />}
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onDelete}>
               <Trash2 className="h-4 w-4 text-destructive" />
@@ -609,16 +623,6 @@ function ChannelEditorDialog({
                 </Button>
               </div>
             </div>
-
-            <div className="space-y-2">
-              <Label>{t("channel.notes")}</Label>
-              <textarea
-                value={form.notes}
-                onChange={(e) => setValue("notes", e.target.value)}
-                className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none resize-none"
-                placeholder={t("channel.notes")}
-              />
-            </div>
           </div>
 
           {/* Model Selection */}
@@ -697,7 +701,7 @@ function ChannelEditorDialog({
                           className="hover:text-destructive"
                           onClick={() => toggleModel(model)}
                         >
-                          脳
+                          &times;
                         </button>
                       </span>
                     ))}

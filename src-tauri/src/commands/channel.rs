@@ -43,6 +43,11 @@ pub fn create_channel(state: State<'_, AppState>, params: CreateChannelParams) -
 
 #[tauri::command]
 pub fn update_channel(state: State<'_, AppState>, params: UpdateChannelParams) -> Result<Channel, AppError> {
+    // If disabling, also disable all associated API pool entries
+    if let Some(false) = params.enabled {
+        state.db.disable_entries_for_channel(&params.id)?;
+    }
+
     state.db.update_channel(
         &params.id,
         params.name.as_deref(),

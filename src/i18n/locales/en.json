@@ -159,12 +159,15 @@
     "cards": {
       "todayRequests": "Today's Requests",
       "todayTokens": "Today's Tokens",
+      "todayPrompt": "Today's Input",
+      "todayCompletion": "Today's Output",
       "performance": "Realtime Performance",
       "successRate": "Success Rate",
       "totalTokens": "Total Tokens",
-      "totalPrompt": "Total Prompt",
-      "totalCompletion": "Total Completion",
-      "avgLatency": "Avg Latency"
+      "totalPrompt": "Total Input",
+      "totalCompletion": "Total Output",
+      "avgLatency": "Avg Latency",
+      "total": "Total"
     },
     "charts": {
       "consumption": "Token Consumption",

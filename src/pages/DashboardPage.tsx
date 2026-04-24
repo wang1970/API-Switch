@@ -10,8 +10,6 @@ import {
   getModelConsumption,
   getCallTrend,
   getModelDistribution,
-  getModelRanking,
-  getUserRanking,
   getUserTrend,
 } from "@/lib/api";
 import type { DashboardFilter } from "@/types";
@@ -80,54 +78,14 @@ function buildSeriesData(
   };
 }
 
-function StatCard({ title, value, sub }: { title: string; value: string | number; sub?: string }) {
+function StatCard({ title, value, totalLabel }: { title: string; value: number; totalLabel?: string }) {
   return (
     <Card>
       <CardContent className="p-4">
         <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold mt-1">{value}</p>
-        {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function TopListCard({
-  title,
-  items,
-  valueLabel,
-  emptyText,
-}: {
-  title: string;
-  items: Array<{ name: string; count: number; extra?: string }>;
-  valueLabel: string;
-  emptyText: string;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {items.length ? (
-          items.map((item, index) => (
-            <div key={`${title}-${item.name}-${index}`} className="rounded-md border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs text-muted-foreground">#{index + 1}</div>
-                  <div className="font-medium truncate">{item.name}</div>
-                  {item.extra ? (
-                    <div className="text-xs text-muted-foreground truncate">{item.extra}</div>
-                  ) : null}
-                </div>
-                <div className="text-right text-sm">
-                  <div>{item.count} {valueLabel}</div>
-                </div>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="text-sm text-muted-foreground">{emptyText}</div>
+        <p className="text-2xl font-bold mt-1">{value.toLocaleString()}</p>
+        {totalLabel !== undefined && (
+          <p className="text-xs text-muted-foreground mt-1">{totalLabel}</p>
         )}
       </CardContent>
     </Card>
@@ -158,16 +116,6 @@ export function DashboardPage() {
     queryFn: () => getModelDistribution(filter),
   });
 
-  const { data: ranking } = useQuery({
-    queryKey: ["modelRanking", filter],
-    queryFn: () => getModelRanking(filter),
-  });
-
-  const { data: userRanking } = useQuery({
-    queryKey: ["userRanking", filter],
-    queryFn: () => getUserRanking(filter),
-  });
-
   const { data: userTrend } = useQuery({
     queryKey: ["userTrend", filter],
     queryFn: () => getUserTrend(filter),
@@ -175,8 +123,6 @@ export function DashboardPage() {
 
   const totalTokens = (stats?.total_prompt_tokens ?? 0) + (stats?.total_completion_tokens ?? 0);
   const todayTokens = (stats?.today_prompt_tokens ?? 0) + (stats?.today_completion_tokens ?? 0);
-  const topModels = (ranking || []).slice(0, 5);
-  const topUsers = (userRanking || []).slice(0, 5);
   const consumptionSeries = buildSeriesData(consumption);
   const callTrendSeries = buildSeriesData(callTrend);
   const userTrendSeries = buildSeriesData(userTrend, 6);
@@ -202,70 +148,39 @@ export function DashboardPage() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold">{t("dashboard.title")}</h1>
-        <div className="flex gap-2">
-          {["today", "7d", "30d"].map((range) => (
-            <Button key={range} variant="outline" size="sm" onClick={() => setTimeRange(range)}>
-              {t(`dashboard.filter.${range === "today" ? "today" : range === "7d" ? "sevenDays" : "thirtyDays"}`)}
-            </Button>
-          ))}
-        </div>
-      </div>
+      <h1 className="text-xl font-semibold mb-6">{t("dashboard.title")}</h1>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <StatCard
           title={t("dashboard.cards.todayRequests")}
           value={stats?.today_requests ?? 0}
-          sub={`${t("dashboard.total")}: ${stats?.total_requests ?? 0}`}
+          totalLabel={`${t("dashboard.cards.total")}: ${(stats?.total_requests ?? 0).toLocaleString()}`}
         />
         <StatCard
           title={t("dashboard.cards.todayTokens")}
           value={todayTokens}
-          sub={`${t("dashboard.prompt")}: ${stats?.today_prompt_tokens ?? 0} / ${t("dashboard.completion")}: ${stats?.today_completion_tokens ?? 0}`}
+          totalLabel={`${t("dashboard.cards.total")}: ${totalTokens.toLocaleString()}`}
         />
         <StatCard
-          title={t("dashboard.cards.performance")}
-          value={`${stats?.rpm ?? 0} RPM`}
-          sub={`${stats?.tpm ?? 0} TPM`}
+          title={t("dashboard.cards.todayPrompt")}
+          value={stats?.today_prompt_tokens ?? 0}
+          totalLabel={`${t("dashboard.cards.total")}: ${(stats?.total_prompt_tokens ?? 0).toLocaleString()}`}
         />
         <StatCard
-          title={t("dashboard.cards.successRate")}
-          value={`${((stats?.success_rate ?? 0) * 100).toFixed(1)}%`}
-          sub={`${t("dashboard.avgLatency")}: ${stats?.avg_latency_ms ?? 0}ms`}
-        />
-        <StatCard
-          title={t("dashboard.cards.totalTokens")}
-          value={totalTokens}
-          sub={`${t("dashboard.total")}: ${totalTokens}`}
-        />
-        <StatCard
-          title={t("dashboard.cards.totalPrompt")}
-          value={stats?.total_prompt_tokens ?? 0}
-          sub={`${t("dashboard.today")}: ${stats?.today_prompt_tokens ?? 0}`}
-        />
-        <StatCard
-          title={t("dashboard.cards.totalCompletion")}
-          value={stats?.total_completion_tokens ?? 0}
-          sub={`${t("dashboard.today")}: ${stats?.today_completion_tokens ?? 0}`}
-        />
-        <StatCard
-          title={t("dashboard.cards.avgLatency")}
-          value={`${Math.round(stats?.avg_latency_ms ?? 0)} ms`}
-          sub={`${t("dashboard.successRate")}: ${((stats?.success_rate ?? 0) * 100).toFixed(1)}%`}
+          title={t("dashboard.cards.todayCompletion")}
+          value={stats?.today_completion_tokens ?? 0}
+          totalLabel={`${t("dashboard.cards.total")}: ${(stats?.total_completion_tokens ?? 0).toLocaleString()}`}
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6">
         {/* Charts */}
         <Tabs defaultValue="consumption">
           <TabsList>
             <TabsTrigger value="consumption">{t("dashboard.charts.consumption")}</TabsTrigger>
             <TabsTrigger value="callTrend">{t("dashboard.charts.callTrend")}</TabsTrigger>
             <TabsTrigger value="distribution">{t("dashboard.charts.distribution")}</TabsTrigger>
-            <TabsTrigger value="ranking">{t("dashboard.charts.ranking")}</TabsTrigger>
-            <TabsTrigger value="userRanking">{t("dashboard.charts.userRanking")}</TabsTrigger>
             <TabsTrigger value="userTrend">{t("dashboard.charts.userTrend")}</TabsTrigger>
           </TabsList>
 
@@ -363,38 +278,6 @@ export function DashboardPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="ranking">
-            <Card>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={(ranking || []).slice(0, 20)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="model" type="category" width={150} />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="#82ca9d" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="userRanking">
-            <Card>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={(userRanking || []).slice(0, 20)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="access_key_name" type="category" width={150} />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="#f59e0b" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
           <TabsContent value="userTrend">
             <Card>
               <CardContent className="pt-6">
@@ -421,30 +304,6 @@ export function DashboardPage() {
             </Card>
           </TabsContent>
         </Tabs>
-
-        <div className="space-y-6">
-          <TopListCard
-            title={t("dashboard.topModels")}
-            valueLabel={t("dashboard.requests")}
-            emptyText={t("common.noData")}
-            items={topModels.map((item) => ({
-              name: item.model,
-              count: item.count,
-              extra: `${item.prompt_tokens + item.completion_tokens} tokens`,
-            }))}
-          />
-
-          <TopListCard
-            title={t("dashboard.topUsers")}
-            valueLabel={t("dashboard.requests")}
-            emptyText={t("common.noData")}
-            items={topUsers.map((item) => ({
-              name: item.access_key_name,
-              count: item.count,
-              extra: `${item.prompt_tokens + item.completion_tokens} tokens`,
-            }))}
-          />
-        </div>
       </div>
     </div>
   );

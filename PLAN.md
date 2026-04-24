@@ -193,10 +193,10 @@
 | 页面 | 文件 | 功能 |
 |------|------|------|
 | API Pool | `ApiPoolPage.tsx` (358行) | 条目列表 + 拖拽排序 + 新建弹窗 + 测试对话弹窗（耗时+token显示） |
-| Channel | `ChannelPage.tsx` (748行) | 统一添加/编辑弹窗（基础配置+内嵌模型选择+一键保存同步） + TanStack React Query |
+| Channel | `ChannelPage.tsx` (752行) | 统一添加/编辑弹窗（基础配置+内嵌模型选择+一键保存同步） + TanStack React Query + 状态切换联动禁用关联条目 |
 | Token | `TokenPage.tsx` | 密钥列表 + 创建/删除 + 启停 + Key 复制 |
 | Logs | `LogPage.tsx` (267行) | 请求日志分页 + 多维筛选 + 详情展开 |
-| Dashboard | `DashboardPage.tsx` (451行) | 统计概览 + 6图表（调用趋势/模型分布/模型排名/用户排名/用户趋势/模型消费） |
+| Dashboard | `DashboardPage.tsx` (321行) | 统计概览 + 4图表（消耗趋势/调用趋势/模型分布/用户趋势） |
 | Settings | `SettingsPage.tsx` (148行) | 代理端口/开关（联动启停） + 熔断参数 + 语言/主题切换 |
 
 #### `App.tsx` — 主布局
@@ -264,11 +264,11 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] **协议适配器单元测试**: 88 个测试覆盖 5 种适配器（OpenAI 10 + Claude 30 + Custom 9 + Azure 10 + Gemini 15 + 公共 7 + 工厂 7），全部通过
 - [x] 熔断器（三态 + 可配置阈值/恢复时间，recovery_secs 从 DB 配置注入）
 - [x] 用量日志记录（25+ 字段，含 token/延迟/错误）
-- [x] Dashboard 统计聚合（总量/今日/RPM/TPM/成功率/平均延迟）
+- [x] Dashboard 统计聚合（总量/今日 Token/输入 Token/输出 Token）
 - [x] 图表数据接口（趋势/分布/排名）
 - [x] 全局配置（KV 存储）
 - [x] 健康检查端点
-- [x] **自动启动代理**: `lib.rs` setup 中根据 `proxy_enabled` 配置自动启动代理服务器，设置页代理开关联动 start/stop
+- [x] **应用图标替换**: `icon.jpg` 通过 sharp + png-to-ico 生成所有尺寸图标（PNG/ICO/ICNS）
 - [x] **CORS 中间件**: `tower-http` CorsLayer 允许所有 origin，支持 WebView 跨域访问代理
 - [x] **API 池测试对话**: `TestChatDialog` 组件，通过 HTTP fetch 走代理端口（测试完整链路），流式 SSE 拆分连接时间(TTFB)+思考时间，显示 token 统计
 
@@ -463,6 +463,22 @@ api-switch/
 | 8 | **API Key 明文切换** | 弹窗内添加密码/明文切换按钮 |
 
 **编译状态**: `cargo check` 0 errors, 15 warnings（均为 dead_code） | `pnpm typecheck` 0 errors
+
+---
+
+### 2026-04-24 — UI 精简 + 图标替换 + 渠道禁用联动（v0.1.5-dev）
+
+**改动文件**: 25 个文件，+429 行 / -204 行
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **应用图标替换** | `icon.jpg` 通过 sharp + png-to-ico 生成所有尺寸图标（16 个文件），替换默认 Tauri 图标 |
+| 2 | **Dashboard 精简** | 移除右上角时间筛选按钮、模型排行/用户排行 tab 及 TopListCard、RPM/TPM/成功率/延迟卡片，统计卡片改为 4 张统一格式（标题→今日→总计） |
+| 3 | **渠道页精简** | 移除搜索框、备注字段，状态列改为圆角标签（绿/灰），操作列新增电源按钮切换启用/禁用 |
+| 4 | **渠道禁用联动** | 禁用渠道时 `UPDATE api_entries SET enabled=0 WHERE channel_id`，启用时不修改条目状态 |
+| 5 | **模型 chip 修复** | 模型选择标签的 `×` 按钮改用 `&times;` HTML 实体修复显示问题 |
+
+**编译状态**: `cargo check` 0 errors | `pnpm typecheck` 0 errors
 
 ---
 
