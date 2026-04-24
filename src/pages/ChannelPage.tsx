@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Edit, Plus, RefreshCw, Save, TestTube2, Trash2, Link2, CheckSquare, Square, Import } from "lucide-react";
+import {
+  Edit, Plus, RefreshCw, Save, Trash2, Link2, CheckSquare, Square, Eye, EyeOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   listChannels,
   createChannel,
@@ -201,19 +204,6 @@ function ChannelRow({
     },
   });
 
-  const testMutation = useMutation({
-    mutationFn: async () => {
-      const models = await fetchModels(channel.id);
-      return models;
-    },
-    onSuccess: (models) => {
-      alert(`Test success: fetched ${models.length} models`);
-    },
-    onError: (err) => {
-      alert(`Test failed: ${err}`);
-    },
-  });
-
   const selectMutation = useMutation({
     mutationFn: (models: string[]) => selectModels(channel.id, models),
     onMutate: async (newSelected) => {
@@ -281,7 +271,7 @@ function ChannelRow({
         </td>
         <td className="px-4 py-3 font-mono text-xs max-w-[320px] truncate">{channel.base_url}</td>
         <td className="px-4 py-3">
-          <span className={cn("text-xs", channel.enabled ? "text-green-600" : "text-muted-foreground") }>
+          <span className={cn("text-xs", channel.enabled ? "text-green-600" : "text-muted-foreground")}>
             {channel.enabled ? t("channel.enabled") : t("channel.disabled")}
           </span>
         </td>
@@ -290,17 +280,6 @@ function ChannelRow({
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
               <Edit className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={selectAllFiltered}>
-              <Import className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => testMutation.mutate()}
-            >
-              <TestTube2 className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onDelete}>
               <Trash2 className="h-4 w-4 text-destructive" />
@@ -425,9 +404,20 @@ function ChannelEditorDialog({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ChannelFormState>(defaultChannelForm());
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
+  const isEdit = !!channel;
 
   useEffect(() => {
     if (!open) return;
+    setAvailableModels([]);
+    setSelectedModels([]);
+    setModelSearch("");
+    setShowApiKey(false);
     if (channel) {
       setForm({
         id: channel.id,
@@ -438,63 +428,16 @@ function ChannelEditorDialog({
         notes: channel.notes,
         enabled: channel.enabled,
       });
+      setAvailableModels(channel.available_models || []);
+      setSelectedModels(channel.selected_models || []);
     } else {
       setForm(defaultChannelForm());
     }
   }, [channel, open]);
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: ChannelFormState) => {
-      if (values.id) {
-        const payload: UpdateChannelParams = {
-          id: values.id,
-          name: values.name,
-          api_type: values.api_type,
-          base_url: values.base_url,
-          api_key: values.api_key,
-          notes: values.notes,
-          enabled: values.enabled,
-        };
-        return updateChannel(payload);
-      }
-      const payload: CreateChannelParams = {
-        name: values.name,
-        api_type: values.api_type,
-        base_url: values.base_url,
-        api_key: values.api_key,
-        notes: values.notes,
-      };
-      return createChannel(payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["channels"] });
-      onOpenChange(false);
-    },
-    onError: (err) => {
-      alert(`Save failed: ${err}`);
-    },
-  });
-
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
-
-  const testMutation = useMutation({
-    mutationFn: async () => {
-      if (!channel?.id) {
-        throw new Error("Save channel before testing");
-      }
-      const models = await fetchModels(channel.id);
-      return models;
-    },
-    onSuccess: (models) => {
-      queryClient.invalidateQueries({ queryKey: ["channels"] });
-      alert(`Test success: fetched ${models.length} models`);
-    },
-    onError: (err) => {
-      alert(`Test failed: ${err}`);
-    },
-  });
 
   const handleApiTypeChange = (type: ApiType) => {
     setForm((prev) => ({
@@ -504,25 +447,127 @@ function ChannelEditorDialog({
         ? API_TYPE_DEFAULT_URLS[type] || prev.base_url
         : prev.base_url,
     }));
+    // Type changed 鈥?reset models
+    setAvailableModels([]);
+    setSelectedModels([]);
   };
 
+  const handleFetchModels = async () => {
+    setFetchingModels(true);
+    try {
+      let channelId = form.id;
+      if (!channelId) {
+        // Create channel first to get an ID for fetching
+        const saved = await createChannel({
+          name: form.name,
+          api_type: form.api_type,
+          base_url: form.base_url,
+          api_key: form.api_key,
+          notes: form.notes,
+        });
+        setForm((prev) => ({ ...prev, id: saved.id }));
+        channelId = saved.id;
+        queryClient.invalidateQueries({ queryKey: ["channels"] });
+      }
+      const models = await fetchModels(channelId);
+      setAvailableModels(models);
+      // Auto-select none 鈥?user picks manually
+      setSelectedModels([]);
+    } catch (err) {
+      alert(`Fetch models failed: ${err}`);
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const toggleModel = (modelName: string) => {
+    setSelectedModels((prev) =>
+      prev.includes(modelName)
+        ? prev.filter((m) => m !== modelName)
+        : [...prev, modelName],
+    );
+  };
+
+  const selectAllFiltered = () => {
+    const filtered = modelSearch
+      ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+      : availableModels;
+    const names = filtered.map((m) => m.name);
+    setSelectedModels((prev) => Array.from(new Set([...prev, ...names])));
+  };
+
+  const clearAllSelected = () => {
+    setSelectedModels([]);
+  };
+
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!form.name || !form.base_url || !form.api_key) return;
+    setSaving(true);
+    try {
+      let channelId = form.id;
+
+      // 1. Save channel info (create or update)
+      if (channelId) {
+        await updateChannel({
+          id: channelId,
+          name: form.name,
+          api_type: form.api_type,
+          base_url: form.base_url,
+          api_key: form.api_key,
+          notes: form.notes,
+          enabled: form.enabled,
+        });
+      } else {
+        const saved = await createChannel({
+          name: form.name,
+          api_type: form.api_type,
+          base_url: form.base_url,
+          api_key: form.api_key,
+          notes: form.notes,
+        });
+        channelId = saved.id;
+      }
+
+      // 2. Sync selected models to pool (if any)
+      if (selectedModels.length > 0) {
+        await selectModels(channelId, selectedModels);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      onOpenChange(false);
+    } catch (err) {
+      alert(`Save failed: ${err}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filteredModels = modelSearch
+    ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+    : availableModels;
+
+  const canSave = form.name && form.base_url && form.api_key;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) setSaving(false); onOpenChange(v); }}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{channel ? t("channel.edit") : t("channel.add")}</DialogTitle>
+          <DialogTitle>{isEdit ? t("channel.edit") : t("channel.add")}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-auto">
+          {/* Basic Configuration */}
+          <div className="space-y-4 pb-4">
             <div className="space-y-2">
-              <Label>{t("channel.name")}</Label>
-              <Input value={form.name} onChange={(e) => setValue("name", e.target.value)} />
+              <Label>{t("channel.name")} <span className="text-destructive">*</span></Label>
+              <Input value={form.name} onChange={(e) => setValue("name", e.target.value)} placeholder={t("channel.name")} />
             </div>
 
             <div className="space-y-2">
               <Label>{t("channel.type")}</Label>
-              <Select value={form.api_type} onValueChange={(v) => handleApiTypeChange(v as ApiType)}>
+              <Select value={form.api_type} onValueChange={(v) => handleApiTypeChange(v as ApiType)} disabled={isEdit}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -534,96 +579,159 @@ function ChannelEditorDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {isEdit && (
+                <p className="text-xs text-muted-foreground">{t("channel.typeChangeDisabled")}</p>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label>{t("channel.baseUrl")}</Label>
-              <Input value={form.base_url} onChange={(e) => setValue("base_url", e.target.value)} />
-              <div className="flex flex-wrap gap-2 pt-1">
-                {API_TYPE_OPTIONS.map((option) => {
-                  const preset = API_TYPE_DEFAULT_URLS[option.value];
-                  if (!preset) return null;
-                  return (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setValue("base_url", preset)}
-                    >
-                      {option.label}
-                    </Button>
-                  );
-                })}
+              <Label>{t("channel.baseUrl")} <span className="text-destructive">*</span></Label>
+              <Input value={form.base_url} onChange={(e) => setValue("base_url", e.target.value)} placeholder="https://api.openai.com" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>{t("channel.apiKey")} <span className="text-destructive">*</span></Label>
+              <div className="relative">
+                <Input
+                  type={showApiKey ? "text" : "password"}
+                  value={form.api_key}
+                  onChange={(e) => setValue("api_key", e.target.value)}
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>{t("channel.apiKey")}</Label>
-              <Input
-                type="password"
-                value={form.api_key}
-                onChange={(e) => setValue("api_key", e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
             <div className="space-y-2">
               <Label>{t("channel.notes")}</Label>
               <textarea
                 value={form.notes}
                 onChange={(e) => setValue("notes", e.target.value)}
-                className="min-h-32 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none"
+                className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none resize-none"
+                placeholder={t("channel.notes")}
               />
             </div>
+          </div>
 
-            <div className="rounded-md border p-4 space-y-3 bg-muted/20">
-              <div className="font-medium text-sm">{t("channel.advanced")}</div>
-              <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
-                <div>
-                  <div className="text-sm font-medium">{t("channel.enabled")}</div>
-                  <div className="text-xs text-muted-foreground">{t("channel.enabledDesc")}</div>
+          {/* Model Selection */}
+          <div className="space-y-3 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">
+                  {availableModels.length > 0
+                    ? t("channel.models.title", { count: availableModels.length })
+                    : t("channel.models.empty")}
                 </div>
-                <Checkbox
-                  checked={form.enabled}
-                  onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
-                />
-              </div>
-              {channel ? (
-                <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
-                  <div>
-                    <div className="text-sm font-medium">{t("common.test")}</div>
-                    <div className="text-xs text-muted-foreground">{t("channel.testDesc")}</div>
+                {availableModels.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    {t("channel.models.selected", { count: selectedModels.length })}
                   </div>
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => testMutation.mutate()}>
-                    <TestTube2 className="h-3.5 w-3.5" />
-                    {t("common.test")}
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={handleFetchModels}
+                disabled={!canSave || fetchingModels}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", fetchingModels && "animate-spin")} />
+                {fetchingModels ? t("channel.models.fetching") : t("channel.models.fetch")}
+              </Button>
+            </div>
+
+            {availableModels.length > 0 && (
+              <>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Input
+                    placeholder={t("channel.models.search")}
+                    value={modelSearch}
+                    onChange={(e) => setModelSearch(e.target.value)}
+                    className="h-8 text-sm flex-1 min-w-48"
+                  />
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={selectAllFiltered}>
+                    <CheckSquare className="h-3.5 w-3.5" />
+                    {t("channel.models.selectFiltered")}
+                  </Button>
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={clearAllSelected}>
+                    <Square className="h-3.5 w-3.5" />
+                    {t("channel.models.clearSelected")}
                   </Button>
                 </div>
-              ) : null}
-            </div>
+
+                <ScrollArea className="h-48 rounded-md border">
+                  <div>
+                    {filteredModels.map((model) => (
+                      <label
+                        key={model.id}
+                        className="flex items-center gap-2 px-3 py-1.5 border-b last:border-b-0 hover:bg-accent cursor-pointer text-sm"
+                      >
+                        <Checkbox
+                          checked={selectedModels.includes(model.name)}
+                          onCheckedChange={() => toggleModel(model.name)}
+                        />
+                        <span className="truncate">{model.name}</span>
+                        {model.owned_by ? (
+                          <span className="text-xs text-muted-foreground ml-auto">{model.owned_by}</span>
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                </ScrollArea>
+
+                {selectedModels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedModels.slice(0, 20).map((model) => (
+                      <span key={model} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
+                        {model}
+                        <button
+                          type="button"
+                          className="hover:text-destructive"
+                          onClick={() => toggleModel(model)}
+                        >
+                          脳
+                        </button>
+                      </span>
+                    ))}
+                    {selectedModels.length > 20 && (
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                        +{selectedModels.length - 20}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <div className="flex-1" />
+
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             {t("common.cancel")}
           </Button>
           <Button
             className="gap-1.5"
-            onClick={() => saveMutation.mutate(form)}
-            disabled={!form.name || !form.base_url || !form.api_key || saveMutation.isPending}
+            onClick={handleSave}
+            disabled={!canSave || saving}
           >
             <Save className="h-4 w-4" />
-            {channel ? t("common.save") : t("common.add")}
+            {saving ? "..." : isEdit ? t("common.save") : t("common.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-
 function InfoBlock({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="rounded-md border bg-background p-3">

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { getProxyStatus } from "@/lib/api";
 import { Send, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +16,8 @@ import type { ApiEntry } from "@/types";
 interface Message {
   role: "user" | "assistant";
   content: string;
-  latency_ms?: number;
+  connect_ms?: number;
+  think_ms?: number;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
@@ -26,27 +27,24 @@ interface TestChatDialogProps {
   entry: ApiEntry | null;
 }
 
-interface TestChatResult {
-  content: string;
-  latency_ms: number;
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-}
-
 export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProps) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [port, setPort] = useState(9090);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open && entry) {
       setMessages([]);
       setInput("");
       setError(null);
-      abortRef.current = false;
+      getProxyStatus().then((status) => {
+        if (status?.port) setPort(status.port);
+      });
     }
   }, [open, entry]);
 
@@ -55,6 +53,10 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -66,36 +68,102 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
     setMessages(newMessages);
     setInput("");
     setLoading(true);
-    abortRef.current = false;
+
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
+    const start = performance.now();
+    let firstChunkTime = 0;
+    let connect_ms = 0;
+    let think_ms = 0;
+    let prompt_tokens = 0;
+    let completion_tokens = 0;
 
     try {
-      const result = await invoke<TestChatResult>("test_chat", {
-        entryId: entry.id,
-        messages: newMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: entry.model,
+          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          stream: true,
+        }),
+        signal: abortController.signal,
       });
 
-      if (!abortRef.current) {
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const payload = trimmed.slice(6);
+          if (payload === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(payload);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              if (firstChunkTime === 0) {
+                firstChunkTime = performance.now();
+                connect_ms = Math.round(firstChunkTime - start);
+              }
+              fullContent += delta;
+
+              // Extract usage if present in stream
+              if (parsed.usage) {
+                prompt_tokens = parsed.usage.prompt_tokens || 0;
+                completion_tokens = parsed.usage.completion_tokens || 0;
+              }
+            }
+          } catch {
+            // Skip malformed JSON
+          }
+        }
+      }
+
+      const endTime = performance.now();
+      think_ms = Math.round(endTime - firstChunkTime);
+
+      if (!abortController.signal.aborted) {
         setMessages([...newMessages, {
           role: "assistant",
-          content: result.content,
-          latency_ms: result.latency_ms,
-          usage: result.usage,
+          content: fullContent,
+          connect_ms,
+          think_ms,
+          usage: prompt_tokens + completion_tokens > 0
+            ? { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens }
+            : undefined,
         }]);
       }
     } catch (err: unknown) {
-      if (!abortRef.current) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        setError(errorMessage);
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (!abortController.signal.aborted) {
+        setError(err instanceof Error ? err.message : String(err));
+        setMessages(newMessages);
       }
     } finally {
-      if (!abortRef.current) {
+      if (!abortController.signal.aborted) {
         setLoading(false);
       }
+      abortRef.current = null;
     }
-  }, [input, loading, entry, messages]);
+  }, [input, loading, entry, messages, port]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -105,15 +173,20 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
   };
 
   const clearMessages = () => {
-    abortRef.current = true;
+    abortRef.current?.abort();
     setMessages([]);
     setError(null);
     setLoading(false);
   };
 
   const handleClose = (v: boolean) => {
-    abortRef.current = true;
+    abortRef.current?.abort();
     onOpenChange(v);
+  };
+
+  const formatMs = (ms: number) => {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${ms}ms`;
   };
 
   return (
@@ -151,9 +224,11 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
                     }`}
                   >
                     {msg.content}
-                    {msg.role === "assistant" && msg.latency_ms != null && (
+                    {msg.role === "assistant" && msg.connect_ms != null && (
                       <div className="mt-1 pt-1 border-t border-border text-[10px] text-muted-foreground">
-                        {(msg.latency_ms / 1000).toFixed(1)}s
+                        <span title="连接时间 (TTFB)">🔗 {formatMs(msg.connect_ms)}</span>
+                        <span className="mx-1.5">+</span>
+                        <span title="思考/生成时间">💭 {formatMs(msg.think_ms || 0)}</span>
                         {msg.usage && (
                           <span className="ml-2">
                             IN:{msg.usage.prompt_tokens}+OUT:{msg.usage.completion_tokens}

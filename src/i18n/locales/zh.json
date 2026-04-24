@@ -63,13 +63,17 @@
     "models": {
       "fetch": "拉取模型列表",
       "fetching": "拉取中...",
+      "fetchAndSelect": "获取模型并选择",
       "selected": "已选择 {{count}} 个模型",
+      "title": "可用模型 ({{count}})",
       "empty": "点击上方按钮拉取可用模型",
       "search": "搜索模型...",
       "importFiltered": "导入到 API 池",
       "selectFiltered": "选中筛选结果",
-      "clearSelected": "清空已选"
+      "clearSelected": "清空已选",
+      "saveAndSelect": "保存并同步"
     },
+    "typeChangeDisabled": "编辑模式下不可修改渠道类型",
     "deleteConfirm": "确定删除渠道 {{name}}？关联的 API 池条目也将被删除。"
   },
   "token": {

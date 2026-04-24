@@ -4,42 +4,65 @@ use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 /// Resolve which entries to try for a given model request.
-/// Returns an ordered list of entries to attempt.
+/// Returns an ordered list of entries to attempt (failover in order).
+///
+/// Rules:
+/// - `auto`: use enabled entries only (auto-select pool).
+/// - exact model match: try matched entries (all, including disabled) first,
+///   then fall back to enabled entries as auto-fallback to prevent disconnection.
+/// - wrong model name: fall back to enabled entries (AUTO behavior).
+///
+/// `enabled_entries`: entries with enabled=1 (AUTO pool).
+/// `all_entries`: all entries including disabled (exact match pool).
 pub async fn resolve(
     model: &str,
-    entries: &[ApiEntry],
+    enabled_entries: &[ApiEntry],
+    all_entries: &[ApiEntry],
     circuit_breakers: &RwLock<HashMap<String, CircuitBreaker>>,
 ) -> Vec<ApiEntry> {
     let breakers = circuit_breakers.read().await;
 
-    // Filter out circuit-open entries
-    let available: Vec<&ApiEntry> = entries
-        .iter()
-        .filter(|e| {
-            if let Some(cb) = breakers.get(&e.id) {
-                cb.is_available()
-            } else {
-                true
-            }
-        })
-        .collect();
+    // Helper: filter out circuit-open entries
+    let filter_available = |entries: &[ApiEntry]| -> Vec<ApiEntry> {
+        entries
+            .iter()
+            .filter(|e| {
+                if let Some(cb) = breakers.get(&e.id) {
+                    cb.is_available()
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect()
+    };
 
     if model == "auto" {
-        // Return all available entries sorted by sort_index (priority)
-        return available.into_iter().cloned().collect();
+        // AUTO: only enabled + available entries
+        return filter_available(enabled_entries);
     }
 
-    // Find entries matching the requested model
-    let matched: Vec<ApiEntry> = available
+    // Exact model match from ALL entries (including disabled)
+    let all_available = filter_available(all_entries);
+    let matched: Vec<ApiEntry> = all_available
         .iter()
         .filter(|e| e.model == model)
-        .map(|e| (*e).clone())
+        .cloned()
         .collect();
 
     if matched.is_empty() {
-        // Fallback: use all available entries (auto behavior)
-        available.into_iter().cloned().collect()
-    } else {
-        matched
+        // Wrong model name → fallback to AUTO (enabled entries)
+        return filter_available(enabled_entries);
     }
+
+    // Exact match found: try matched entries first,
+    // then append enabled entries as auto-fallback to prevent disconnection.
+    let enabled_available = filter_available(enabled_entries);
+    let mut result = matched;
+    for entry in &enabled_available {
+        if !result.iter().any(|e| e.id == entry.id) {
+            result.push(entry.clone());
+        }
+    }
+    result
 }

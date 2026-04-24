@@ -63,13 +63,17 @@
     "models": {
       "fetch": "Fetch Models",
       "fetching": "Fetching...",
+      "fetchAndSelect": "Fetch & Select Models",
       "selected": "{{count}} models selected",
+      "title": "Available Models ({{count}})",
       "empty": "Click the button above to fetch available models",
       "search": "Search models...",
       "importFiltered": "Import to API Pool",
       "selectFiltered": "Select Filtered",
-      "clearSelected": "Clear Selected"
+      "clearSelected": "Clear Selected",
+      "saveAndSelect": "Save & Sync"
     },
+    "typeChangeDisabled": "Channel type cannot be changed in edit mode",
     "deleteConfirm": "Delete channel {{name}}? Associated API pool entries will also be removed."
   },
   "token": {

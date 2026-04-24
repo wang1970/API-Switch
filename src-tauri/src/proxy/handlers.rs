@@ -53,8 +53,9 @@ pub async fn handle_chat_completions(
         .unwrap_or(false);
 
     // Resolve target entries
-    let entries = state.db.get_enabled_entries_for_routing()?;
-    let resolved = router::resolve(&requested_model, &entries, &state.circuit_breakers).await;
+    let enabled_entries = state.db.get_enabled_entries_for_routing()?;
+    let all_entries = state.db.get_entries_for_routing_all()?;
+    let resolved = router::resolve(&requested_model, &enabled_entries, &all_entries, &state.circuit_breakers).await;
 
     if resolved.is_empty() {
         return Err(ProxyError::NoAvailableProvider(requested_model));

@@ -123,9 +123,11 @@
 - `ProxyError` 枚举: Unauthorized / NoAvailableProvider / AllProvidersFailed / Internal
 
 #### `proxy/router.rs` — 智能路由
-- 过滤熔断关闭的条目
-- `model == "auto"`: 返回所有可用条目（按 sort_index 优先级）
-- 指定模型: 精确匹配 → 空则 fallback 到全部可用条目
+- 接收 `enabled_entries`（仅启用的）和 `all_entries`（含禁用的）两组列表
+- `model == "auto"`: 仅使用 enabled 条目（AUTO 选择范围）
+- 精确匹配 model: 从 ALL 条目中查找（含 disabled），匹配到的 + enabled 条目作为 fallback（保证不断链）
+- 错误模型名: fallback 到 enabled 条目（AUTO 行为）
+- 熔断条目自动跳过
 
 #### `proxy/auth.rs` — 认证
 - 从 `Authorization: Bearer <key>` 提取密钥
@@ -170,7 +172,7 @@
 | `usage` | get_usage_logs, get_dashboard_stats, get_model_consumption, get_call_trend, get_model/user_distribution, get_model/user_ranking | 统计数据 |
 | `config` | get_settings, update_settings | 全局配置 |
 | `proxy_cmd` | start_proxy, stop_proxy, get_proxy_status | 代理服务器控制 |
-| `test_chat` | test_chat | API 池测试对话（非流式，返回内容+耗时+token） |
+| `test_chat` | test_chat | API 池测试对话（直接通过适配器调用上游，不走路由） |
 
 ### 3.2 前端模块 (`src/`)
 
@@ -191,7 +193,7 @@
 | 页面 | 文件 | 功能 |
 |------|------|------|
 | API Pool | `ApiPoolPage.tsx` (358行) | 条目列表 + 拖拽排序 + 新建弹窗 + 测试对话弹窗（耗时+token显示） |
-| Channel | `ChannelPage.tsx` (815行) | 平铺列表 + 操作列（导入/编辑/删除） + 创建/编辑弹窗 + 导入模型弹窗（含拉取） + 连通性测试弹窗 + TanStack React Query |
+| Channel | `ChannelPage.tsx` (748行) | 统一添加/编辑弹窗（基础配置+内嵌模型选择+一键保存同步） + TanStack React Query |
 | Token | `TokenPage.tsx` | 密钥列表 + 创建/删除 + 启停 + Key 复制 |
 | Logs | `LogPage.tsx` (267行) | 请求日志分页 + 多维筛选 + 详情展开 |
 | Dashboard | `DashboardPage.tsx` (451行) | 统计概览 + 6图表（调用趋势/模型分布/模型排名/用户排名/用户趋势/模型消费） |
@@ -268,7 +270,7 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] 健康检查端点
 - [x] **自动启动代理**: `lib.rs` setup 中根据 `proxy_enabled` 配置自动启动代理服务器，设置页代理开关联动 start/stop
 - [x] **CORS 中间件**: `tower-http` CorsLayer 允许所有 origin，支持 WebView 跨域访问代理
-- [x] **API 池测试对话**: `test_chat` 命令，通过 Tauri IPC 直接调用 forwarder（不走 HTTP），返回内容 + 耗时 + token 统计
+- [x] **API 池测试对话**: `TestChatDialog` 组件，通过 HTTP fetch 走代理端口（测试完整链路），流式 SSE 拆分连接时间(TTFB)+思考时间，显示 token 统计
 
 ### 5.2 前端 UI
 - [x] 中英双语国际化 (i18next)
@@ -276,7 +278,9 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] Dashboard 页面（统计卡片 + 6 种 Recharts 图表）
 - [x] Channel 管理页面（平铺列表 + 操作列导入/编辑/删除 + 创建/编辑弹窗 + 导入模型弹窗含拉取 + 连通性测试弹窗 + TanStack React Query）
 - [x] API Pool 页面（拖拽排序 @dnd-kit + 新建弹窗 + 测试对话弹窗 + 渠道/模型双行显示）
-- [x] **TestChatDialog 组件**: 测试对话弹窗，通过 Tauri IPC 调用后端 forwarder，显示响应耗时（秒）和 token 统计（IN/OUT）
+- [x] **TestChatDialog 组件**: 测试对话弹窗，HTTP fetch 走代理端口（流式 SSE），连接时间 🔗 + 思考时间 💭 拆分显示，IN/OUT token 统计
+- [x] **渠道添加/编辑统一弹窗**: 基础配置 + 内嵌模型拉取/选择，保存时同步到 API 池，新增模型默认 disabled
+- [x] **路由 fallback 不断链**: 精确匹配条目（含 disabled）+ enabled 条目作为 auto-fallback，错误模型名直接 fallback 到 AUTO
 - [x] Token 密钥管理页面（独立页面，创建/删除/启停 + Key 复制）
 - [x] Log 日志页面（分页 + 多维筛选 + 详情展开）
 - [x] Settings 设置页面（代理/熔断/语言/主题）
@@ -380,12 +384,12 @@ api-switch/
 │       │   ├── usage.rs                    # 统计命令
 │       │   ├── config.rs                   # 配置命令
 │       │   ├── proxy_cmd.rs               # 代理控制命令
-│       │   └── test_chat.rs              # API 池测试对话命令 (含耗时+token)
+│       │   └── test_chat.rs              # API 池测试对话命令 (直接适配器调用)
 │       └── proxy/
 │           ├── mod.rs                      # 模块导出
 │           ├── server.rs                   # Axum 服务器
 │           ├── handlers.rs                 # 请求处理 (138行)
-│           ├── router.rs                   # 智能路由
+│           ├── router.rs                   # 智能路由 (enabled+all双列表, fallback不断链)
 │           ├── auth.rs                     # 认证
 │           ├── forwarder.rs                # 转发 + 重试 (499行)
 │           ├── circuit_breaker.rs          # 熔断器
@@ -408,10 +412,10 @@ api-switch/
 │   │   ├── ui/                             # Radix UI 组件
 │   │   └── proxy/
 │   │       ├── ProxyToggle.tsx             # 代理启停按钮
-│   │       └── TestChatDialog.tsx          # 测试对话弹窗 (耗时+token)
+│   │       └── TestChatDialog.tsx          # 测试对话弹窗 (流式SSE, 连接+思考拆分)
 │   └── pages/
 │       ├── DashboardPage.tsx               # Dashboard (451行)
-│       ├── ChannelPage.tsx                 # 渠道管理 (888行)
+│       ├── ChannelPage.tsx                 # 渠道管理 (统一弹窗+模型选择)
 │       ├── ApiPoolPage.tsx                 # API 池 (513行)
 │       ├── TokenPage.tsx                   # 密钥管理
 │       ├── LogPage.tsx                     # 日志 (267行)
@@ -440,6 +444,25 @@ api-switch/
 | 10 | **i18n 补充** | 中英文添加 `apiPool.testChat` 系列 key |
 
 **编译状态**: `cargo check` 0 errors, 12 warnings（均为 dead_code） | `pnpm typecheck` 0 errors | 92 tests passed
+
+---
+
+### 2026-04-24 — 路由 fallback + 测试对话流式拆分 + 渠道弹窗统一（v0.1.5-dev）
+
+**改动文件**: 9 个文件，+492 行 / -244 行
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **路由 fallback 不断链** | `router.rs` 改为双列表（enabled + all），精确匹配查所有条目（含 disabled），后追加 enabled 作为 auto-fallback，错误模型名直接 fallback 到 AUTO |
+| 2 | **handlers.rs 传双列表** | `handle_chat_completions` 同时查 `get_enabled_entries_for_routing()` + `get_entries_for_routing_all()` 传给 router |
+| 3 | **get_entries_for_routing_all** | `api_entry_dao.rs` 新增方法，查所有条目（含 disabled），供路由精确匹配和测试对话使用 |
+| 4 | **新条目默认 disabled** | `sync_entries_for_channel` 新增条目时 `enabled` 从 `1` 改为 `0` |
+| 5 | **test_chat 直接适配器调用** | 不走路由/forwarder，直接通过 `get_adapter()` 调上游，支持 disabled 条目测试 |
+| 6 | **TestChatDialog 流式 SSE** | 改回 HTTP fetch 走代理端口（测试完整链路），`stream: true`，拆分 🔗连接时间 (TTFB) + 💭思考时间 |
+| 7 | **渠道添加/编辑统一弹窗** | `ChannelPage.tsx` 统一为同一个界面流程：基础配置 + 内嵌模型拉取/选择，保存时同步到 API 池 |
+| 8 | **API Key 明文切换** | 弹窗内添加密码/明文切换按钮 |
+
+**编译状态**: `cargo check` 0 errors, 15 warnings（均为 dead_code） | `pnpm typecheck` 0 errors
 
 ---
 

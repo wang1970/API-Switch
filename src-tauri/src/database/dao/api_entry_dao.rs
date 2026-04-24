@@ -224,7 +224,7 @@ impl Database {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
                     "INSERT INTO api_entries (id, channel_id, model, display_name, sort_index, enabled, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?3, ?4, 1, ?5, ?5)",
+                     VALUES (?1, ?2, ?3, ?3, ?4, 0, ?5, ?5)",
                     rusqlite::params![id, channel_id, model, max_sort + 1, now],
                 )?;
             }
@@ -258,7 +258,52 @@ impl Database {
         let entries = stmt
             .query_map([], |row| {
                 let enabled: i32 = row.get(5)?;
-                // Map channel_api_type to owned_by (model provider)
+                let owned_by =
+                    row.get::<_, String>(9)
+                        .ok()
+                        .and_then(|api_type| match api_type.as_str() {
+                            "openai" | "anthropic" => Some("openai".to_string()),
+                            "claude" => Some("anthropic".to_string()),
+                            "gemini" => Some("google".to_string()),
+                            "azure" => Some("openai".to_string()),
+                            "custom" => Some("custom".to_string()),
+                            _ => Some(api_type),
+                        });
+                Ok(ApiEntry {
+                    id: row.get(0)?,
+                    channel_id: row.get(1)?,
+                    model: row.get(2)?,
+                    display_name: row.get(3)?,
+                    sort_index: row.get(4)?,
+                    enabled: enabled != 0,
+                    circuit_state: "closed".to_string(),
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    channel_name: row.get(8).ok(),
+                    channel_api_type: row.get(9).ok(),
+                    owned_by,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(entries)
+    }
+
+    /// Get all entries (including disabled) with channel info. Used for test chat.
+    pub fn get_entries_for_routing_all(&self) -> Result<Vec<ApiEntry>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
+                    e.created_at, e.updated_at, c.name, c.api_type
+             FROM api_entries e
+             LEFT JOIN channels c ON e.channel_id = c.id
+             ORDER BY e.sort_index",
+        )?;
+
+        let entries = stmt
+            .query_map([], |row| {
+                let enabled: i32 = row.get(5)?;
                 let owned_by =
                     row.get::<_, String>(9)
                         .ok()
