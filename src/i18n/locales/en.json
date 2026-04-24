@@ -3,7 +3,7 @@
     "title": "API Switch"
   },
   "nav": {
-    "apiPool": "API Pool",
+    "apiPool": "API Mgmt",
     "channels": "Channels",
     "logs": "Usage Logs",
     "tokens": "Access Keys",
@@ -11,7 +11,7 @@
     "settings": "Settings"
   },
   "apiPool": {
-    "title": "API Pool",
+    "title": "API Management",
     "description": "Manage the final exposed models with channel import and manual fallback entry.",
     "empty": "No API entries yet. Add a channel and select models first.",
     "addApi": "Add API",
@@ -200,8 +200,8 @@
     },
     "circuit": {
       "title": "Circuit Breaker",
-      "threshold": "Failure Threshold",
-      "recovery": "Recovery Time(s)"
+      "threshold": "Consecutive Failures",
+      "recovery": "Recovery Wait (sec)"
     },
     "tray": {
       "title": "System Tray",

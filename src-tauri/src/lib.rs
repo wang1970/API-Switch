@@ -73,10 +73,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Hide or show main window based on settings
+            // Show or keep hidden based on settings
             if let Some(window) = app.get_webview_window("main") {
-                if settings.start_minimized {
-                    let _ = window.hide();
+                if !settings.start_minimized {
+                    let _ = window.show();
                 }
 
                 // Intercept window close → hide to tray instead of exiting

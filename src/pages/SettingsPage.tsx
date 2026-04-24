@@ -37,7 +37,7 @@ export function SettingsPage() {
   const s = { ...DEFAULT_SETTINGS, ...settings };
 
   const update = (key: string, value: any) => {
-    updateMutation.mutate({ [key]: value });
+    updateMutation.mutate({ ...s, [key]: value });
   };
 
   const changeLocale = (locale: string) => {

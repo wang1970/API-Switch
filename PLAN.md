@@ -302,7 +302,7 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] **系统托盘**: `TrayIconBuilder::with_id` 创建托盘，菜单含"打开主窗口"+ 5 个优先 API（CheckMenuItem）+ 退出
 - [x] **托盘优先级切换**: 点击 CheckMenuItem 更新 DB sort_index，重建菜单刷新勾选状态，`emit("tray-priority-changed")` 通知前端刷新 API Pool
 - [x] **关闭窗口隐藏到托盘**: 拦截 `CloseRequested`，`prevent_close()` + `hide()` 替代退出，退出仅通过托盘菜单 "Exit"
-- [x] **托盘设置**: 设置页新增"系统托盘"卡片，支持"跟随系统启动"和"启动最小化"开关
+- [x] **托盘设置**: `autostart` 通过 `auto-launch` crate 注册/注销系统开机自启；`start_minimized` 控制启动时是否隐藏窗口
 - [x] **AppState Clone**: 支持 Clone 以便 TrayIconBuilder 闭包捕获
 
 ### P2 — 体验优化

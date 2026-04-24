@@ -3,15 +3,15 @@
     "title": "API Switch"
   },
   "nav": {
-    "apiPool": "API 池",
+    "apiPool": "API 管理",
     "channels": "渠道管理",
     "logs": "使用日志",
     "tokens": "令牌管理",
     "dashboard": "数据看板",
-    "settings": "设置"
+    "settings": "系统设置"
   },
   "apiPool": {
-    "title": "API 池管理",
+    "title": "API 管理",
     "description": "统一管理最终对外暴露的模型，支持渠道导入与手动补录",
     "empty": "暂无 API 条目，请先在渠道管理中添加渠道并选择模型",
     "addApi": "添加 API",
@@ -187,7 +187,7 @@
     }
   },
   "settings": {
-    "title": "设置",
+    "title": "系统设置",
     "proxy": {
       "title": "代理设置",
       "enabled": "启用代理",
@@ -199,9 +199,9 @@
       "address": "监听地址"
     },
     "circuit": {
-      "title": "熔断设置",
-      "threshold": "失败阈值",
-      "recovery": "恢复时间(秒)"
+      "title": "熔断机制",
+      "threshold": "连续失败次数",
+      "recovery": "恢复等待时间(秒)"
     },
     "tray": {
       "title": "系统托盘",
