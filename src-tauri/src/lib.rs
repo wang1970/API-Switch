@@ -103,6 +103,7 @@ pub fn run() {
             commands::channel::update_channel,
             commands::channel::delete_channel,
             commands::channel::fetch_models,
+            commands::channel::fetch_models_direct,
             commands::channel::select_models,
             commands::pool::list_entries,
             commands::pool::toggle_entry,

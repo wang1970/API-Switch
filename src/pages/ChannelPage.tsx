@@ -31,6 +31,7 @@ import {
   updateChannel,
   deleteChannel,
   fetchModels,
+  fetchModelsDirect,
   selectModels,
 } from "@/lib/api";
 import { API_TYPE_OPTIONS, API_TYPE_DEFAULT_URLS } from "@/types";
@@ -447,8 +448,6 @@ function ChannelEditorDialog({
     } else {
       setForm(defaultChannelForm());
     }
-    setPreCreatedId(null);
-    setWasSaved(false);
   }, [channel, open]);
 
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
@@ -471,24 +470,15 @@ function ChannelEditorDialog({
   const handleFetchModels = async () => {
     setFetchingModels(true);
     try {
-      let channelId = form.id;
-      if (!channelId) {
-        // Create channel first to get an ID for fetching
-        const saved = await createChannel({
-          name: form.name,
-          api_type: form.api_type,
-          base_url: form.base_url,
-          api_key: form.api_key,
-          notes: form.notes,
-        });
-        setForm((prev) => ({ ...prev, id: saved.id }));
-        channelId = saved.id;
-        setPreCreatedId(saved.id);
-        queryClient.invalidateQueries({ queryKey: ["channels"] });
+      if (form.id) {
+        // Edit mode: use existing channel ID
+        const models = await fetchModels(form.id);
+        setAvailableModels(models);
+      } else {
+        // New mode: fetch directly without creating channel
+        const models = await fetchModelsDirect(form.api_type, form.base_url, form.api_key);
+        setAvailableModels(models);
       }
-      const models = await fetchModels(channelId);
-      setAvailableModels(models);
-      // Auto-select none 鈥?user picks manually
       setSelectedModels([]);
     } catch (err) {
       alert(`Fetch models failed: ${err}`);
@@ -518,8 +508,6 @@ function ChannelEditorDialog({
   };
 
   const [saving, setSaving] = useState(false);
-  const [preCreatedId, setPreCreatedId] = useState<string | null>(null);
-  const [wasSaved, setWasSaved] = useState(false);
 
   const handleSave = async () => {
     if (!form.name || !form.base_url || !form.api_key) return;
@@ -555,7 +543,6 @@ function ChannelEditorDialog({
       }
 
       queryClient.invalidateQueries({ queryKey: ["channels"] });
-      setWasSaved(true);
       onOpenChange(false);
     } catch (err) {
       alert(`Save failed: ${err}`);
@@ -572,15 +559,7 @@ function ChannelEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => {
-      if (!v) {
-        // User cancelled — clean up pre-created channel if save was not completed
-        if (preCreatedId && !wasSaved) {
-          deleteChannel(preCreatedId).then(() => {
-            queryClient.invalidateQueries({ queryKey: ["channels"] });
-          }).catch(() => {});
-        }
-        setSaving(false);
-      }
+      if (!v) setSaving(false);
       onOpenChange(v);
     }}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">

@@ -41,6 +41,10 @@ export async function fetchModels(channelId: string): Promise<ModelInfo[]> {
   return invoke("fetch_models", { channelId });
 }
 
+export async function fetchModelsDirect(apiType: string, baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
+  return invoke("fetch_models_direct", { apiType, baseUrl, apiKey });
+}
+
 export async function selectModels(channelId: string, modelNames: string[]): Promise<void> {
   return invoke("select_models", { channelId, modelNames });
 }

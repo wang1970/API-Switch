@@ -81,6 +81,18 @@ pub async fn fetch_models(
     Ok(models)
 }
 
+/// Fetch models directly from upstream API without needing a saved channel.
+/// Used by the "add channel" dialog to preview models before saving.
+#[tauri::command]
+pub async fn fetch_models_direct(
+    _state: State<'_, AppState>,
+    api_type: String,
+    base_url: String,
+    api_key: String,
+) -> Result<Vec<ModelInfo>, AppError> {
+    fetch_models_from_api(&api_type, &base_url, &api_key).await
+}
+
 #[tauri::command]
 pub fn select_models(
     state: State<'_, AppState>,
