@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -96,79 +96,78 @@ export function LogPage() {
               const isExpanded = expandedId === log.id;
               const hasDetail = log.content || log.error_message || log.other;
               return (
-                <tr key={log.id} className="border-b hover:bg-muted/30">
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <div>{new Date(log.created_at * 1000).toLocaleString()}</div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div>{log.channel_name}</div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    <div>
-                      {log.requested_model === "auto"
-                        ? `(auto)${log.model}`
-                        : log.model}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div>
-                  </td>
-                  <td className="px-3 py-2 text-right">{log.prompt_tokens}</td>
-                  <td className="px-3 py-2 text-right">{log.completion_tokens}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      {hasDetail ? (
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:text-foreground p-0"
-                          onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                        >
-                          {isExpanded
-                            ? <ChevronDown className="h-3.5 w-3.5" />
-                            : <ChevronRight className="h-3.5 w-3.5" />}
-                        </button>
-                      ) : null}
-                      <span className={log.success ? "text-green-600" : "text-red-500"}>
-                        {log.success ? t("log.success") : t("log.failed")}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {logs.map((log) => {
-              if (expandedId !== log.id) return null;
-              return (
-                <tr key={`detail-${log.id}`} className="border-b bg-muted/20">
-                  <td colSpan={8} className="px-4 py-3">
-                    <div className="space-y-2 text-xs max-w-3xl">
-                      {log.other ? (
-                        <div>
-                          <div className="font-medium text-muted-foreground mb-1">Meta</div>
-                          <pre className="whitespace-pre-wrap break-all text-muted-foreground">{log.other}</pre>
+                <Fragment key={log.id}>
+                  <tr className="border-b hover:bg-muted/30">
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div>{new Date(log.created_at * 1000).toLocaleString()}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div>{log.channel_name}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      <div>
+                        {log.requested_model === "auto"
+                          ? `(auto)${log.model}`
+                          : log.model}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right">{log.prompt_tokens}</td>
+                    <td className="px-3 py-2 text-right">{log.completion_tokens}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1">
+                        {hasDetail ? (
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground p-0"
+                            onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                          >
+                            {isExpanded
+                              ? <ChevronDown className="h-3.5 w-3.5" />
+                              : <ChevronRight className="h-3.5 w-3.5" />}
+                          </button>
+                        ) : null}
+                        <span className={log.success ? "text-green-600" : "text-red-500"}>
+                          {log.success ? t("log.success") : t("log.failed")}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded ? (
+                    <tr className="border-b bg-muted/20">
+                      <td colSpan={8} className="px-4 py-3">
+                        <div className="space-y-2 text-xs max-w-3xl">
+                          {log.other ? (
+                            <div>
+                              <div className="font-medium text-muted-foreground mb-1">Meta</div>
+                              <pre className="whitespace-pre-wrap break-all text-muted-foreground">{log.other}</pre>
+                            </div>
+                          ) : null}
+                          {log.content ? (
+                            <div>
+                              <div className="font-medium text-muted-foreground mb-1">{t("log.details")}</div>
+                              <pre className="whitespace-pre-wrap break-all">{log.content}</pre>
+                            </div>
+                          ) : null}
+                          {log.error_message ? (
+                            <div>
+                              <div className="font-medium text-red-500 mb-1">{t("log.error")}</div>
+                              <pre className="whitespace-pre-wrap break-all text-red-500">{log.error_message}</pre>
+                            </div>
+                          ) : null}
+                          {!log.content && !log.error_message && !log.other ? (
+                            <span className="text-muted-foreground">{t("log.noError")}</span>
+                          ) : null}
                         </div>
-                      ) : null}
-                      {log.content ? (
-                        <div>
-                          <div className="font-medium text-muted-foreground mb-1">{t("log.details")}</div>
-                          <pre className="whitespace-pre-wrap break-all">{log.content}</pre>
-                        </div>
-                      ) : null}
-                      {log.error_message ? (
-                        <div>
-                          <div className="font-medium text-red-500 mb-1">{t("log.error")}</div>
-                          <pre className="whitespace-pre-wrap break-all text-red-500">{log.error_message}</pre>
-                        </div>
-                      ) : null}
-                      {!log.content && !log.error_message && !log.other ? (
-                        <span className="text-muted-foreground">{t("log.noError")}</span>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               );
             })}
           </tbody>
