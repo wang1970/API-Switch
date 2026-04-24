@@ -428,7 +428,81 @@ api-switch/
 └── PLAN.md                                 # ← 本文件
 ```
 
+## 9. 已知问题 & 待修复 BUG
+
+### 🔴 P0 — 影响正常使用
+
+| # | 问题 | 根因 | 现象 | 建议 |
+|---|------|------|------|------|
+| 1 | **流式成功日志丢失** | `log_usage` 只在 `Poll::Ready(None)` 调用，客户端提前断开时 stream body 被 drop，`Ready(None)` 不触发，日志不写 | 外部接入正常回复，但日志页看不到成功记录，只有失败记录 | **需修复**：在 `poll_fn` 的 `move` 闭包捕获列表中放一个 `StreamLogGuard`，随 stream body 生命周期 drop。详见下方"流式日志修复方案" |
+| 2 | **上游状态码不透传** | `ProxyError::Internal` 固定返回 HTTP 500，上游 401/429 等全部变成 500 | 客户端无法区分"key 无效"和"服务器错误" | **需修复**：新增 `ProxyError::Upstream { status, message }` 变体，在 `IntoResponse` 中透传状态码。曾实现过 `c341e6d` 但因和 disable_codes 机制耦合被回滚，解耦后应可正常工作 |
+| 3 | **熔断状态不持久化** | `circuit_breakers` 在 `HashMap` 内存中，重启丢失 | 重启后所有已熔断的条目恢复正常，可能再次触发失败 | P3 优先级，非阻断 |
+
+### 🟡 P1 — 功能增强
+
+| # | 功能 | 说明 |
+|---|------|------|
+| 4 | **配置驱动的错误路由** | `circuit_disable_codes`/`circuit_retry_codes`/`disable_keywords` 三个设置字段 DB 已建好，`parse_status_codes()`/`parse_keywords()` 工具函数已实现（在 `circuit_breaker.rs`），forwarder 中已移除使用。待稳定后重新接入 |
+| 5 | **Gemini 原生格式验证** | `gemini.rs` 中原生格式转换函数已实现但未接入 trait |
+| 6 | **Azure deployment 验证** | `azure.rs` 已实现完整路径+api-key+模型列表解析，待有 Azure 资源端到端验证 |
+| 7 | **请求速率限制** | 当前无 RPM/TPM 限流 |
+
+### 📝 流式日志修复方案（待实现）
+
+**问题**：`futures::stream::poll_fn` 的 `move` 闭包捕获的变量和返回的 stream 生命周期一致，但之前尝试把 `StreamLogGuard` 放在闭包内部会每次 poll 都重建并 drop。
+
+**正确方案**：
+
+```rust
+fn build_streaming_response(...) -> axum::response::Response {
+    let guard = StreamLogGuard { ... };  // 在闭包外创建
+    let logged = Arc::new(AtomicBool::new(false));
+
+    let body_stream = futures::stream::poll_fn(move |cx| -> Poll<...> {
+        // guard 在 move 闭包的捕获列表中，生命周期和 stream 绑定
+        let _guard = &guard;  // 借用 guard（不拥有），保证不 drop
+        
+        match upstream_stream.as_mut().poll_next(cx) {
+            Poll::Ready(None) => {
+                if !logged.swap(true, Ordering::Relaxed) {
+                    log_usage(...);  // 正常结束写日志
+                }
+                Poll::Ready(None)
+            }
+            // ... 其他分支
+        }
+    });
+
+    // 返回 response，guard 的实际生命周期和 body_stream 绑定
+    axum::Response::builder().body(Body::from_stream(body_stream))
+}
+```
+
+**关键点**：`StreamLogGuard` 必须在 `poll_fn` 闭包的 `move` 捕获列表中，这样它的生命周期和返回的 `body_stream` 一致。stream 被 drop 时 guard 自动 drop 触发 `Drop::drop()` 写日志。`Ready(None)` 路径先 `logged.swap(true)` 写日志，guard 的 `Drop` 发现 `logged=true` 就跳过，避免重复。
+
+**之前尝试失败的 3 次**：
+1. `f520356` — 成功时立即写日志 → 流式写两条（立即 0 token + 结束有 token）
+2. `792163e` — guard 在 `build_streaming_response` 函数作用域 → 函数返回时 drop，比 stream 早
+3. `9234e1d` — `GuardHolder(Option<StreamLogGuard>)` 在闭包内 → 局部变量每次 poll 都 drop
+
+---
+
 ## 10. 变更日志
+
+### 2026-04-24 — 简化代理错误路由，移除配置驱动机制（v0.1.5-dev）
+
+**原因**: 自动禁用状态码/重试状态码/禁用关键词三个机制引入后导致多个 BUG（流式日志丢失、上游状态码不透传、401 不滚动），且修复过程复杂，回退到简单可靠的状态。
+
+**改动**:
+- forwarder.rs 移除 `disable_codes`/`retry_codes`/`disable_keywords` 逻辑
+- 设置页移除 3 个输入框，只保留连续失败次数和恢复等待时间
+- 熔断机制保留：所有错误记录失败 + 滚动到下一个 entry
+- `parse_status_codes()`/`parse_keywords()` 保留在 `circuit_breaker.rs` 供后续使用
+- DB 字段 `circuit_disable_codes`/`circuit_retry_codes`/`disable_keywords` 保留不删
+
+**当前代理逻辑**: 任何错误 → 记录熔断 → 继续滚动 → 全部失败返回最后错误
+
+---
 
 ### 2026-04-24 — v0.1.5-dev 功能完善 & 体验优化
 
