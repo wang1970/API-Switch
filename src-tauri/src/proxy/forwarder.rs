@@ -25,6 +25,15 @@ struct ForwardResult {
     status_code: i32,
 }
 
+/// Parse newline-separated keywords into lowercase Vec.
+fn parse_keywords(input: &str) -> Vec<String> {
+    input
+        .lines()
+        .map(|line| line.trim().to_lowercase())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
 /// Forward a request to the resolved entries with retry/failover.
 pub async fn forward_with_retry(
     state: &ProxyState,
@@ -44,6 +53,10 @@ pub async fn forward_with_retry(
     let retry_codes = settings
         .as_ref()
         .map(|s| parse_status_codes(&s.circuit_retry_codes))
+        .unwrap_or_default();
+    let disable_keywords = settings
+        .as_ref()
+        .map(|s| parse_keywords(&s.disable_keywords))
         .unwrap_or_default();
 
     let mut last_error: Option<(String, u16)> = None;
@@ -86,6 +99,17 @@ pub async fn forward_with_retry(
                     &state.db, access_key, entry, requested_model,
                     is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
                 );
+
+                // Auto-disable channel: if error message contains any keyword
+                let e_lower = e.to_lowercase();
+                if disable_keywords.iter().any(|kw| e_lower.contains(kw)) {
+                    log::warn!(
+                        "Disable keyword matched for entry {} (channel {}), disabling channel",
+                        entry.id, entry.channel_id
+                    );
+                    let _ = state.db.disable_channel(&entry.channel_id);
+                    return Err(ProxyError::Internal(e));
+                }
 
                 // 504 and 524 are never retried (always return immediately)
                 if status == 504 || status == 524 {

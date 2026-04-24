@@ -32,29 +32,33 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
                     enabled, last_fetch_at, notes, created_at, updated_at
-             FROM channels ORDER BY created_at"
+             FROM channels ORDER BY created_at",
         )?;
 
-        let channels = stmt.query_map([], |row| {
-            let available_models_str: String = row.get(5)?;
-            let selected_models_str: String = row.get(6)?;
-            let enabled: i32 = row.get(7)?;
+        let channels = stmt
+            .query_map([], |row| {
+                let available_models_str: String = row.get(5)?;
+                let selected_models_str: String = row.get(6)?;
+                let enabled: i32 = row.get(7)?;
 
-            Ok(Channel {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                api_type: row.get(2)?,
-                base_url: row.get(3)?,
-                api_key: row.get(4)?,
-                available_models: serde_json::from_str(&available_models_str).unwrap_or_default(),
-                selected_models: serde_json::from_str(&selected_models_str).unwrap_or_default(),
-                enabled: enabled != 0,
-                last_fetch_at: row.get(8)?,
-                notes: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>().map_err(|e| AppError::Database(e.to_string()))?;
+                Ok(Channel {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    api_type: row.get(2)?,
+                    base_url: row.get(3)?,
+                    api_key: row.get(4)?,
+                    available_models: serde_json::from_str(&available_models_str)
+                        .unwrap_or_default(),
+                    selected_models: serde_json::from_str(&selected_models_str).unwrap_or_default(),
+                    enabled: enabled != 0,
+                    last_fetch_at: row.get(8)?,
+                    notes: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(channels)
     }
@@ -110,7 +114,7 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
                         enabled, last_fetch_at, notes, created_at, updated_at
-                 FROM channels WHERE id = ?1"
+                 FROM channels WHERE id = ?1",
             )?;
             stmt.query_row([id], |row| {
                 let available_models_str: String = row.get(5)?;
@@ -122,7 +126,8 @@ impl Database {
                     api_type: row.get(2)?,
                     base_url: row.get(3)?,
                     api_key: row.get(4)?,
-                    available_models: serde_json::from_str(&available_models_str).unwrap_or_default(),
+                    available_models: serde_json::from_str(&available_models_str)
+                        .unwrap_or_default(),
                     selected_models: serde_json::from_str(&selected_models_str).unwrap_or_default(),
                     enabled: enabled != 0,
                     last_fetch_at: row.get(8)?,
@@ -130,7 +135,8 @@ impl Database {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
-            }).map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))?
+            })
+            .map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))?
         };
 
         let name = name.unwrap_or(&current.name);
@@ -183,7 +189,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
                     enabled, last_fetch_at, notes, created_at, updated_at
-             FROM channels WHERE id = ?1"
+             FROM channels WHERE id = ?1",
         )?;
 
         stmt.query_row([id], |row| {
@@ -205,6 +211,23 @@ impl Database {
                 created_at: row.get(10)?,
                 updated_at: row.get(11)?,
             })
-        }).map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))
+        })
+        .map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))
+    }
+
+    /// Disable a channel by ID (sets enabled=0 and cascades to api_entries).
+    pub fn disable_channel(&self, channel_id: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "UPDATE channels SET enabled = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, channel_id],
+        )?;
+        conn.execute(
+            "UPDATE api_entries SET enabled = 0, updated_at = ?1 WHERE channel_id = ?2",
+            rusqlite::params![now, channel_id],
+        )?;
+        log::warn!("Channel disabled by keyword match: {channel_id}");
+        Ok(())
     }
 }

@@ -11,6 +11,7 @@ pub struct AppSettings {
     pub circuit_recovery_secs: i64,
     pub circuit_disable_codes: String,
     pub circuit_retry_codes: String,
+    pub disable_keywords: String,
     pub locale: String,
     pub theme: String,
     pub autostart: bool,
@@ -28,8 +29,8 @@ impl Default for AppSettings {
             locale: "zh".to_string(),
             theme: "system".to_string(),
             circuit_disable_codes: "401".to_string(),
-            circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599"
-                .to_string(),
+            circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599".to_string(),
+            disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized".to_string(),
             autostart: false,
             start_minimized: false,
         }
@@ -70,6 +71,9 @@ impl Database {
         }
         if let Some(v) = kv.get("circuit_retry_codes") {
             settings.circuit_retry_codes = v.clone();
+        }
+        if let Some(v) = kv.get("disable_keywords") {
+            settings.disable_keywords = v.clone();
         }
         if let Some(v) = kv.get("locale") {
             settings.locale = v.clone();
@@ -114,6 +118,7 @@ impl Database {
             ),
             ("circuit_disable_codes", &updates.circuit_disable_codes),
             ("circuit_retry_codes", &updates.circuit_retry_codes),
+            ("disable_keywords", &updates.disable_keywords),
             ("locale", &updates.locale),
             ("theme", &updates.theme),
             ("autostart", if updates.autostart { "1" } else { "0" }),

@@ -199,6 +199,7 @@ export interface AppSettings {
   circuit_recovery_secs: number;
   circuit_disable_codes: string;
   circuit_retry_codes: string;
+  disable_keywords: string;
   locale: string;
   theme: "light" | "dark" | "system";
   autostart: boolean;
@@ -213,6 +214,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   circuit_recovery_secs: 60,
   circuit_disable_codes: "401",
   circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599",
+  disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized",
   locale: "zh",
   theme: "system",
   autostart: false,
