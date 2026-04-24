@@ -447,6 +447,8 @@ function ChannelEditorDialog({
     } else {
       setForm(defaultChannelForm());
     }
+    setPreCreatedId(null);
+    setWasSaved(false);
   }, [channel, open]);
 
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
@@ -481,6 +483,7 @@ function ChannelEditorDialog({
         });
         setForm((prev) => ({ ...prev, id: saved.id }));
         channelId = saved.id;
+        setPreCreatedId(saved.id);
         queryClient.invalidateQueries({ queryKey: ["channels"] });
       }
       const models = await fetchModels(channelId);
@@ -515,6 +518,8 @@ function ChannelEditorDialog({
   };
 
   const [saving, setSaving] = useState(false);
+  const [preCreatedId, setPreCreatedId] = useState<string | null>(null);
+  const [wasSaved, setWasSaved] = useState(false);
 
   const handleSave = async () => {
     if (!form.name || !form.base_url || !form.api_key) return;
@@ -550,6 +555,7 @@ function ChannelEditorDialog({
       }
 
       queryClient.invalidateQueries({ queryKey: ["channels"] });
+      setWasSaved(true);
       onOpenChange(false);
     } catch (err) {
       alert(`Save failed: ${err}`);
@@ -565,7 +571,18 @@ function ChannelEditorDialog({
   const canSave = form.name && form.base_url && form.api_key;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) setSaving(false); onOpenChange(v); }}>
+    <Dialog open={open} onOpenChange={(v) => {
+      if (!v) {
+        // User cancelled — clean up pre-created channel if save was not completed
+        if (preCreatedId && !wasSaved) {
+          deleteChannel(preCreatedId).then(() => {
+            queryClient.invalidateQueries({ queryKey: ["channels"] });
+          }).catch(() => {});
+        }
+        setSaving(false);
+      }
+      onOpenChange(v);
+    }}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{isEdit ? t("channel.edit") : t("channel.add")}</DialogTitle>
