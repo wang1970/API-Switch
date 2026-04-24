@@ -121,10 +121,8 @@ pub async fn forward_with_retry(
                     return Err(ProxyError::Internal(e));
                 }
 
-                // Circuit breaker: trip on 5xx and connection failures
-                if status >= 500 || status == 0 {
-                    record_circuit_failure(state, &entry.id).await;
-                }
+                // Circuit breaker: trip on any error (non-2xx and connection failures)
+                record_circuit_failure(state, &entry.id).await;
 
                 // Check retry: if status NOT in retry_codes, stop retrying
                 if !retry_codes.contains(&status) {
