@@ -283,22 +283,19 @@ function AddApiDialog({
   const queryClient = useQueryClient();
   const [channelId, setChannelId] = useState("");
   const [modelName, setModelName] = useState("");
+  const [displayName, setDisplayName] = useState("");
 
-  const channelOptions = useMemo(
-    () => channels.filter((channel) => (channel.available_models || []).length > 0),
-    [channels],
-  );
-
-  const selectedChannel = channelOptions.find((channel) => channel.id === channelId);
-  const modelOptions = selectedChannel?.available_models || [];
+  const channelOptions = channels.filter((c) => c.enabled);
 
   const createMutation = useMutation({
-    mutationFn: () => createEntry({ channel_id: channelId, model: modelName }),
+    mutationFn: () => createEntry({
+      channel_id: channelId,
+      model: modelName,
+      display_name: displayName || undefined,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       onOpenChange(false);
-      setChannelId("");
-      setModelName("");
     },
     onError: (err) => {
       alert(`Add API failed: ${err}`);
@@ -320,6 +317,7 @@ function AddApiDialog({
               onValueChange={(value) => {
                 setChannelId(value);
                 setModelName("");
+                setDisplayName("");
               }}
             >
               <SelectTrigger>
@@ -337,23 +335,21 @@ function AddApiDialog({
 
           <div className="space-y-2">
             <div className="text-sm font-medium">{t("apiPool.model")}</div>
-            <Select value={modelName} onValueChange={setModelName} disabled={!channelId}>
-              <SelectTrigger>
-                <SelectValue placeholder={t("apiPool.selectModel")} />
-              </SelectTrigger>
-              <SelectContent>
-                {modelOptions.map((model) => (
-                  <SelectItem key={model.id} value={model.name}>
-                    {model.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              placeholder={t("apiPool.modelPlaceholder")}
+            />
           </div>
 
-          {!channelOptions.length ? (
-            <div className="text-sm text-muted-foreground">{t("apiPool.noImportableModels")}</div>
-          ) : null}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">{t("apiPool.displayName")}</div>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={t("apiPool.displayNamePlaceholder")}
+            />
+          </div>
         </div>
 
         <DialogFooter>
