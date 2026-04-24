@@ -210,7 +210,7 @@
       "retryCodes": "Auto-Retry Status Codes",
       "retryDesc": "Failover to next provider on these status codes. Supports single codes or ranges (inclusive), comma-separated; 504 and 524 are never retried regardless",
       "disableKeywords": "Auto-Disable Keywords",
-      "disableKeywordsDesc": "Automatically disable the channel when upstream error contains any keyword (case-insensitive), one per line"
+      "disableKeywordsDesc": "Automatically disable the current API entry when upstream error contains any keyword (case-insensitive), one per line"
     },
     "tray": {
       "title": "System Tray",

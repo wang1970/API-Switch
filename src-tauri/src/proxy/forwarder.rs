@@ -100,14 +100,14 @@ pub async fn forward_with_retry(
                     is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
                 );
 
-                // Auto-disable channel: if error message contains any keyword
+                // Auto-disable entry: if error message contains any keyword
                 let e_lower = e.to_lowercase();
                 if disable_keywords.iter().any(|kw| e_lower.contains(kw)) {
                     log::warn!(
-                        "Disable keyword matched for entry {} (channel {}), disabling channel",
-                        entry.id, entry.channel_id
+                        "Disable keyword matched for entry {}, disabling entry only",
+                        entry.id
                     );
-                    let _ = state.db.disable_channel(&entry.channel_id);
+                    let _ = state.db.toggle_entry(&entry.id, false);
                     return Err(ProxyError::Internal(e));
                 }
 
