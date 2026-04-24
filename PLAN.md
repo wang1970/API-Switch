@@ -300,6 +300,9 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [ ] **请求速率限制**: 当前无 RPM/TPM 限流，高并发下可能打爆上游
 - [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史
 - [ ] **系统托盘**: `Cargo.toml` 已启用 `tray-icon` feature，但未实现托盘菜单
+- [x] **系统托盘菜单**: 顶层平铺 5 个优先 API（CheckMenuItem），分隔线，退出。点击条目设为最高优先级。双击托盘图标弹出主窗口
+- [x] **托盘设置**: 设置页新增"系统托盘"卡片，支持"跟随系统启动"和"启动最小化"开关
+- [x] **AppState Clone**: 支持 Clone 以便 TrayIconBuilder 闭包捕获
 
 ### P2 — 体验优化
 - [ ] **实时日志推送**: 当前日志靠轮询，可改为 Tauri Event 实时推送
@@ -481,6 +484,22 @@ api-switch/
 **编译状态**: `cargo check` 0 errors | `pnpm typecheck` 0 errors
 
 ---
+
+### 2026-04-24 — 系统托盘 + 优先级切换（v0.1.5-dev）
+
+**改动文件**: 8 个文件，+120 行 / -30 行
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **系统托盘** | `TrayIconBuilder` 构建托盘：图标 + 菜单 + 双击事件。顶层平铺 5 个优先 API（CheckMenuItem），点击设为最高优先级，分隔线 + 退出 |
+| 2 | **双击托盘弹出窗口** | `on_tray_icon_event` 处理，无 menu_id 时触发 `window.show()` |
+| 3 | **托盘设置** | 设置页新增"系统托盘"卡片：跟随系统启动（`autostart`）、启动最小化（`start_minimized`），默认均为 false |
+| 4 | **启动窗口逻辑** | 根据 `start_minimized` 决定是否隐藏窗口（不再无条件隐藏） |
+| 5 | **AppSettings 扩展** | 新增 `autostart: bool` + `start_minimized: bool` 字段，DB 读写已接入 |
+
+---
+
+### 2026-04-24 — UI 精简 + 图标替换 + 渠道禁用联动（v0.1.5-dev）
 
 ### 2026-04-23 — 协议适配模块化重构（v0.1.2-dev）
 

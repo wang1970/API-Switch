@@ -199,6 +199,8 @@ export interface AppSettings {
   circuit_recovery_secs: number;
   locale: string;
   theme: "light" | "dark" | "system";
+  autostart: boolean;
+  start_minimized: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -209,6 +211,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   circuit_recovery_secs: 60,
   locale: "zh",
   theme: "system",
+  autostart: false,
+  start_minimized: false,
 };
 
 // --- Proxy ---

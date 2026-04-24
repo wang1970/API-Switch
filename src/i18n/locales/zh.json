@@ -203,6 +203,11 @@
       "threshold": "失败阈值",
       "recovery": "恢复时间(秒)"
     },
+    "tray": {
+      "title": "系统托盘",
+      "autostart": "跟随系统启动",
+      "startMinimized": "启动最小化"
+    },
     "general": {
       "title": "通用设置",
       "language": "语言",

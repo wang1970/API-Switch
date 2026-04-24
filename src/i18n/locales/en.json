@@ -203,6 +203,11 @@
       "threshold": "Failure Threshold",
       "recovery": "Recovery Time(s)"
     },
+    "tray": {
+      "title": "System Tray",
+      "autostart": "Auto-start with System",
+      "startMinimized": "Start Minimized"
+    },
     "general": {
       "title": "General",
       "language": "Language",

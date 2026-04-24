@@ -7,10 +7,12 @@ use database::Database;
 use proxy::ProxyServer;
 use std::sync::Arc;
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, CheckMenuItem, PredefinedMenuItem};
 
 pub use error::AppError;
 
 /// Shared application state
+#[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
@@ -18,7 +20,7 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let _app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
@@ -51,28 +53,56 @@ pub fn run() {
                 }
             });
 
+            // Read settings to decide startup behavior
+            let settings = app.state::<AppState>().db.get_settings().unwrap_or_default();
+
+            // Build tray menu
+            let tray_menu = build_tray_menu(app.handle())?;
+
+            // Build tray icon
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap())
+                .menu(&tray_menu)
+                .on_menu_event(move |_tray, event| {
+                    handle_menu_event(&event);
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Double-click tray icon to show main window
+                    let id = event.id();
+                    if id.as_ref().is_empty() {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Hide or show main window based on settings
+            if let Some(window) = app.get_webview_window("main") {
+                if settings.start_minimized {
+                    let _ = window.hide();
+                }
+            }
+
             log::info!("API Switch initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Channel
             commands::channel::list_channels,
             commands::channel::create_channel,
             commands::channel::update_channel,
             commands::channel::delete_channel,
             commands::channel::fetch_models,
             commands::channel::select_models,
-            // API Pool
             commands::pool::list_entries,
             commands::pool::toggle_entry,
             commands::pool::reorder_entries,
             commands::pool::create_entry,
-            // Access Keys
             commands::token::list_access_keys,
             commands::token::create_access_key,
             commands::token::delete_access_key,
             commands::token::toggle_access_key,
-            // Usage
             commands::usage::get_usage_logs,
             commands::usage::get_dashboard_stats,
             commands::usage::get_model_consumption,
@@ -81,16 +111,71 @@ pub fn run() {
             commands::usage::get_model_ranking,
             commands::usage::get_user_ranking,
             commands::usage::get_user_trend,
-            // Config
             commands::config::get_settings,
             commands::config::update_settings,
-            // Proxy
             commands::proxy_cmd::start_proxy,
             commands::proxy_cmd::stop_proxy,
             commands::proxy_cmd::get_proxy_status,
-            // Test Chat
             commands::test_chat::test_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let entries = app.state::<AppState>()
+        .db.get_enabled_entries_for_routing()
+        .unwrap_or_default();
+    let top5: Vec<_> = entries.into_iter().take(5).collect();
+    let count = top5.len();
+
+    let check_items: Vec<CheckMenuItem<tauri::Wry>> = top5
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let checked = i == 0 && entry.enabled;
+            CheckMenuItem::with_id(app, &entry.id, &entry.display_name, checked, true, None::<String>).unwrap()
+        })
+        .collect();
+
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(count + 2);
+    for item in &check_items {
+        all.push(item);
+    }
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<String>)?;
+
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(count + 2);
+    for item in &check_items {
+        all.push(item);
+    }
+    all.push(&separator as &dyn tauri::menu::IsMenuItem<_>);
+    all.push(&quit as &dyn tauri::menu::IsMenuItem<_>);
+
+    Menu::with_items(app, &all)
+}
+
+fn handle_menu_event(event: &tauri::menu::MenuEvent) {
+    let id = event.id();
+    if id.as_ref() == "quit" {
+        std::process::exit(0);
+    } else {
+        let entry_id = id.as_ref();
+        let db_path = dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("api-switch")
+            .join("api-switch.db");
+
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = ?1 WHERE id != ?2",
+                rusqlite::params![now, entry_id],
+            );
+            let _ = conn.execute(
+                "UPDATE api_entries SET sort_index = 0, updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, entry_id],
+            );
+        }
+    }
 }

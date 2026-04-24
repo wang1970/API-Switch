@@ -11,6 +11,8 @@ pub struct AppSettings {
     pub circuit_recovery_secs: i64,
     pub locale: String,
     pub theme: String,
+    pub autostart: bool,
+    pub start_minimized: bool,
 }
 
 impl Default for AppSettings {
@@ -23,6 +25,8 @@ impl Default for AppSettings {
             circuit_recovery_secs: 60,
             locale: "zh".to_string(),
             theme: "system".to_string(),
+            autostart: false,
+            start_minimized: false,
         }
     }
 }
@@ -62,6 +66,12 @@ impl Database {
         if let Some(v) = kv.get("theme") {
             settings.theme = v.clone();
         }
+        if let Some(v) = kv.get("autostart") {
+            settings.autostart = v == "1";
+        }
+        if let Some(v) = kv.get("start_minimized") {
+            settings.start_minimized = v == "1";
+        }
 
         Ok(settings)
     }
@@ -70,13 +80,34 @@ impl Database {
         let conn = lock_conn!(self.conn);
 
         let kv = [
-            ("proxy_enabled", if updates.proxy_enabled { "1" } else { "0" }),
+            (
+                "proxy_enabled",
+                if updates.proxy_enabled { "1" } else { "0" },
+            ),
             ("listen_port", &updates.listen_port.to_string()),
-            ("access_key_required", if updates.access_key_required { "1" } else { "0" }),
-            ("circuit_failure_threshold", &updates.circuit_failure_threshold.to_string()),
-            ("circuit_recovery_secs", &updates.circuit_recovery_secs.to_string()),
+            (
+                "access_key_required",
+                if updates.access_key_required {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+            (
+                "circuit_failure_threshold",
+                &updates.circuit_failure_threshold.to_string(),
+            ),
+            (
+                "circuit_recovery_secs",
+                &updates.circuit_recovery_secs.to_string(),
+            ),
             ("locale", &updates.locale),
             ("theme", &updates.theme),
+            ("autostart", if updates.autostart { "1" } else { "0" }),
+            (
+                "start_minimized",
+                if updates.start_minimized { "1" } else { "0" },
+            ),
         ];
 
         for (key, value) in kv {
@@ -91,11 +122,9 @@ impl Database {
 
     pub fn get_config_value(&self, key: &str) -> Result<Option<String>, AppError> {
         let conn = lock_conn!(self.conn);
-        let result = conn.query_row(
-            "SELECT value FROM config WHERE key = ?1",
-            [key],
-            |row| row.get(0),
-        );
+        let result = conn.query_row("SELECT value FROM config WHERE key = ?1", [key], |row| {
+            row.get(0)
+        });
 
         match result {
             Ok(v) => Ok(Some(v)),

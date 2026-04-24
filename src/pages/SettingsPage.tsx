@@ -119,6 +119,29 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* System Tray */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">{t("settings.tray.title")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label>{t("settings.tray.autostart")}</Label>
+            <Switch
+              checked={s.autostart}
+              onCheckedChange={(v) => update("autostart", v)}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label>{t("settings.tray.startMinimized")}</Label>
+            <Switch
+              checked={s.start_minimized}
+              onCheckedChange={(v) => update("start_minimized", v)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* General */}
       <Card className="mb-6">
         <CardHeader>

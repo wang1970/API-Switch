@@ -129,6 +129,22 @@ impl Database {
         Ok(())
     }
 
+    /// Set a single entry's sort_index to 0 and shift others down to keep relative order.
+    pub fn set_entry_priority(&self, entry_id: &str, sort_index: i32) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        // Set all entries' sort_index to sort_index + 1 first, then set the target to sort_index
+        conn.execute(
+            "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = (SELECT strftime('%s','now')) WHERE id != ?1",
+            rusqlite::params![entry_id],
+        )?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "UPDATE api_entries SET sort_index = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![sort_index, now, entry_id],
+        )?;
+        Ok(())
+    }
+
     pub fn reorder_entries(&self, ordered_ids: &[String]) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
