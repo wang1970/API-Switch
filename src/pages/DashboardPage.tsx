@@ -127,17 +127,10 @@ export function DashboardPage() {
   const callTrendSeries = buildSeriesData(callTrend);
   const userTrendSeries = buildSeriesData(userTrend, 6);
 
-  // Limit distribution to TOP 10, rest as "Other"
+  // Limit distribution to TOP 10
   const distributionData = (() => {
     if (!distribution?.length) return [];
-    const sorted = [...distribution].sort((a, b) => b.count - a.count);
-    const top = sorted.slice(0, 10);
-    const rest = sorted.slice(10);
-    if (rest.length > 0) {
-      const otherCount = rest.reduce((sum, item) => sum + item.count, 0);
-      top.push({ model: "Other", count: otherCount, prompt_tokens: 0, completion_tokens: 0 });
-    }
-    return top;
+    return [...distribution].sort((a, b) => b.count - a.count).slice(0, 10);
   })();
 
   const setTimeRange = (range: string) => {
