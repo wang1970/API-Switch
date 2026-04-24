@@ -127,6 +127,19 @@ export function DashboardPage() {
   const callTrendSeries = buildSeriesData(callTrend);
   const userTrendSeries = buildSeriesData(userTrend, 6);
 
+  // Limit distribution to TOP 10, rest as "Other"
+  const distributionData = (() => {
+    if (!distribution?.length) return [];
+    const sorted = [...distribution].sort((a, b) => b.count - a.count);
+    const top = sorted.slice(0, 10);
+    const rest = sorted.slice(10);
+    if (rest.length > 0) {
+      const otherCount = rest.reduce((sum, item) => sum + item.count, 0);
+      top.push({ model: "Other", count: otherCount, prompt_tokens: 0, completion_tokens: 0 });
+    }
+    return top;
+  })();
+
   const setTimeRange = (range: string) => {
     const now = Date.now() / 1000;
     let start: number;
@@ -258,7 +271,7 @@ export function DashboardPage() {
                 <ResponsiveContainer width="100%" height={400}>
                   <PieChart>
                     <Pie
-                      data={distribution || []}
+                      data={distributionData}
                       dataKey="count"
                       nameKey="model"
                       cx="50%"
@@ -266,7 +279,7 @@ export function DashboardPage() {
                       outerRadius={150}
                       label
                     >
-                      {(distribution || []).map((_, index) => (
+                      {distributionData.map((_, index) => (
                         <Cell key={index} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
