@@ -1,4 +1,4 @@
-use super::circuit_breaker::{parse_status_codes, CircuitBreaker};
+use super::circuit_breaker::CircuitBreaker;
 use super::handlers::ProxyError;
 use super::protocol::get_adapter;
 use super::server::ProxyState;
@@ -46,19 +46,6 @@ pub async fn forward_with_retry(
 ) -> Result<axum::response::Response, ProxyError> {
     // Read circuit config once
     let settings = state.db.get_settings().ok();
-    let disable_codes = settings
-        .as_ref()
-        .map(|s| parse_status_codes(&s.circuit_disable_codes))
-        .unwrap_or_default();
-    let retry_codes = settings
-        .as_ref()
-        .map(|s| parse_status_codes(&s.circuit_retry_codes))
-        .unwrap_or_default();
-    let disable_keywords = settings
-        .as_ref()
-        .map(|s| parse_keywords(&s.disable_keywords))
-        .unwrap_or_default();
-
     let mut last_error: Option<(String, u16)> = None;
 
     for entry in entries {
@@ -100,34 +87,8 @@ pub async fn forward_with_retry(
                     is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
                 );
 
-                // Auto-disable entry: if error message contains any keyword
-                let e_lower = e.to_lowercase();
-                if disable_keywords.iter().any(|kw| e_lower.contains(kw)) {
-                    log::warn!(
-                        "Disable keyword matched for entry {}, disabling entry only",
-                        entry.id
-                    );
-                    let _ = state.db.toggle_entry(&entry.id, false);
-                    return Err(ProxyError::Internal(e));
-                }
-
-                // 504 and 524 are never retried (always return immediately)
-                if status == 504 || status == 524 {
-                    return Err(ProxyError::Internal(e));
-                }
-
-                // Auto-disable: if status is in disable_codes, immediately fail
-                if disable_codes.contains(&status) {
-                    return Err(ProxyError::Internal(e));
-                }
-
-                // Circuit breaker: trip on any error (non-2xx and connection failures)
+                // Record circuit breaker failure
                 record_circuit_failure(state, &entry.id).await;
-
-                // Check retry: if status NOT in retry_codes, stop retrying
-                if !retry_codes.contains(&status) {
-                    return Err(ProxyError::Internal(e));
-                }
 
                 last_error = Some((e, status));
                 continue;
