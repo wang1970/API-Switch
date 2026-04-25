@@ -157,6 +157,18 @@ export async function getProxyStatus(): Promise<ProxyStatus> {
   return invoke("get_proxy_status");
 }
 
+// --- Update ---
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  url: string;
+}
+
+export async function checkUpdate(): Promise<UpdateInfo | null> {
+  return invoke("check_update");
+}
+
 // --- Tray ---
 
 export async function refreshTrayMenu(): Promise<void> {

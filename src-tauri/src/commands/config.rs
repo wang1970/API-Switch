@@ -1,7 +1,60 @@
 use crate::database::AppSettings;
 use crate::error::AppError;
 use crate::AppState;
-use tauri::State;
+use serde::Deserialize;
+use tauri::{Emitter, State};
+
+const GITHUB_REPO: &str = "wang1970/API-Switch";
+
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    body: Option<String>,
+}
+
+#[tauri::command]
+pub async fn check_update(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, AppError> {
+    let current = env!("CARGO_PKG_VERSION");
+
+    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Network(e.to_string()))?;
+
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "api-switch")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let release: GithubRelease = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?;
+
+    let latest = release.tag_name.trim_start_matches('v').to_string();
+
+    if latest == current {
+        return Ok(None);
+    }
+
+    let update_info = serde_json::json!({
+        "current": current,
+        "latest": latest,
+        "url": release.html_url,
+    });
+
+    let _ = app.emit("update-available", &update_info);
+    Ok(Some(update_info))
+}
 
 fn sync_autostart(settings: &AppSettings) {
     let app_name = "API Switch";

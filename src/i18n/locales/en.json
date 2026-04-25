@@ -242,6 +242,10 @@
     "noData": "No data",
     "doNotShowAgain": "Don't show again"
   },
+  "update": {
+    "newVersion": "New version v{{version}} available",
+    "goDownload": "Download"
+  },
   "guide": {
     "title": "Quick Start",
     "description": "What makes API Switch special:",

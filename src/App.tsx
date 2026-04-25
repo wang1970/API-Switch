@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import {
   Layers,
   Route,
@@ -8,6 +9,7 @@ import {
   BarChart3,
   Settings,
   Power,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,7 +23,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { useQuery } from "@tanstack/react-query";
-import { getSettings, updateSettings } from "@/lib/api";
+import { getSettings, updateSettings, checkUpdate } from "@/lib/api";
 
 type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings";
 
@@ -44,6 +46,21 @@ export default function App() {
   });
 
   const [guideOpen, setGuideOpen] = useState(true);
+  const [updateInfo, setUpdateInfo] = useState<{ current: string; latest: string; url: string } | null>(null);
+
+  // Check for updates on startup
+  useEffect(() => {
+    const unlisten = listen<{ current: string; latest: string; url: string }>(
+      "update-available",
+      (event) => {
+        setUpdateInfo(event.payload);
+      }
+    );
+    checkUpdate();
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   // Apply locale and theme
   useEffect(() => {
@@ -94,7 +111,31 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex flex-col h-screen bg-background">
+      {/* Update banner */}
+      {updateInfo && (
+        <div className="flex items-center justify-center gap-2 bg-primary/10 text-primary px-3 py-1.5 text-xs shrink-0">
+          <span>
+            {t("update.newVersion", { version: updateInfo.latest })}
+          </span>
+          <a
+            href={updateInfo.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+          >
+            {t("update.goDownload")}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+          <button
+            onClick={() => setUpdateInfo(null)}
+            className="ml-1 opacity-60 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      <div className="flex flex-1 min-h-0">
       {/* Sidebar */}
       <aside className="flex w-56 flex-col border-r border-sidebar-border bg-sidebar-background">
         {/* Logo */}
@@ -146,6 +187,7 @@ export default function App() {
           onDismiss={handleGuideDismiss}
         />
       )}
+      </div>
     </div>
   );
 }

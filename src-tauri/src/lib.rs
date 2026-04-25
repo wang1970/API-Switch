@@ -123,6 +123,7 @@ pub fn run() {
             commands::usage::get_user_trend,
             commands::config::get_settings,
             commands::config::update_settings,
+            commands::config::check_update,
             commands::proxy_cmd::start_proxy,
             commands::proxy_cmd::stop_proxy,
             commands::proxy_cmd::get_proxy_status,

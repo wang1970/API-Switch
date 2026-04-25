@@ -242,6 +242,10 @@
     "noData": "暂无数据",
     "doNotShowAgain": "不再提示"
   },
+  "update": {
+    "newVersion": "发现新版本 v{{version}}",
+    "goDownload": "前往下载"
+  },
   "guide": {
     "title": "快速上手",
     "description": "API Switch 核心特色：",
