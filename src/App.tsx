@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Layers,
@@ -35,7 +35,7 @@ const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string }[] = [
 ];
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [currentPage, setCurrentPage] = useState<Page>("apiPool");
 
   const { data: settings } = useQuery({
@@ -44,6 +44,31 @@ export default function App() {
   });
 
   const [guideOpen, setGuideOpen] = useState(true);
+
+  // Apply locale and theme
+  useEffect(() => {
+    if (!settings) return;
+
+    // Apply locale from DB
+    const saved = localStorage.getItem("api-switch-locale");
+    if (!saved && settings.locale) {
+      i18n.changeLanguage(settings.locale);
+    }
+
+    // Apply theme
+    const root = document.documentElement;
+    if (settings.theme === "dark") {
+      root.classList.add("dark");
+    } else if (settings.theme === "light") {
+      root.classList.remove("dark");
+    } else {
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    }
+  }, [settings]);
 
   const handleGuideDismiss = (dontShowAgain: boolean) => {
     if (dontShowAgain) {

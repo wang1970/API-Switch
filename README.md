@@ -1,8 +1,12 @@
 # API Switch
 
 > Personal API Management & Forwarding Hub
->
-> Manage multiple AI API providers through a single endpoint with automatic failover — never go down.
+
+Manage multiple AI API providers through a single endpoint with automatic failover — never go down.
+
+## 💡 Why
+
+Building Agents and experimenting with models means managing various API keys and switching between providers. Existing tools have their limits: **CC-Switch** is lightweight but CLI-only, **New API** is powerful but too heavy for personal use. API Switch combines the best of both: a lightweight desktop app with a clean GUI, one-line API setup, one-click model switching, plus smart routing and fault tolerance — designed for individuals.
 
 ## ✨ Features
 
@@ -20,15 +24,19 @@
 4. Go to **API Mgmt** and enable the model entries you want to use
 5. Point your client's API base URL to `http://127.0.0.1:9090`, set model to `auto` or any specific name — no API Key required
 
+## 📦 Downloads
+
+Visit [Releases](https://github.com/wang1970/API-Switch/releases) for the latest version.
+
 ## 🔧 Supported Providers
 
-| Provider | Auth Method | Description |
-|----------|-------------|-------------|
-| OpenAI | Bearer Token | Standard OpenAI API |
-| Anthropic | x-api-key | Claude series models |
-| Google Gemini | Query Parameter | OpenAI-compatible endpoint |
-| Azure OpenAI | api-key Header | Deployment name required |
-| Custom | Bearer Token | Any OpenAI-compatible third-party service |
+| Provider      | Auth Method     | Description                              |
+| ------------- | --------------- | ---------------------------------------- |
+| OpenAI        | Bearer Token    | Standard OpenAI API                     |
+| Anthropic     | x-api-key       | Claude series models                     |
+| Google Gemini | Query Parameter | OpenAI-compatible endpoint               |
+| Azure OpenAI  | api-key Header  | Deployment name required                 |
+| Custom        | Bearer Token    | Any OpenAI-compatible third-party service |
 
 ## 🛡️ Circuit Breaker & Fault Tolerance
 
@@ -74,6 +82,10 @@ All data is stored alongside the executable. Delete both files to completely rem
 ## 📜 License
 
 [MIT License](LICENSE)
+
+## ⚠️ Disclaimer
+
+This is a public project for personal API management convenience. Data is not encrypted — users are responsible for their own data security.
 
 ## ⭐ Star
 

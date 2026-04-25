@@ -1,8 +1,12 @@
 # API Switch
 
 > 个人 API 管理与转发中心
-> 
-> 统一管理多个 AI API 渠道，一个入口访问所有服务，自动故障转移，永不断线。
+
+统一管理多个 AI API 渠道，一个入口访问所有服务，自动故障转移，永不断线。
+
+## 💡 为什么做这个
+
+玩 AGENT 玩模型经常需要管理各种 API Key，切换不同模型和渠道。现有工具各有局限：**CC-Switch** 轻量但只是针对 CLI，**New API** 功能强大但对个人用户来说太过繁琐。API Switch 综合二者的思路：轻量桌面应用，简洁的图形界面，一行配置接入 API，一键切换模型，加上智能路由和故障转移 — 专为个人用户设计。
 
 ## ✨ 核心特色
 
@@ -26,13 +30,13 @@
 
 ## 🔧 支持的 API 渠道
 
-| 渠道 | 认证方式 | 说明 |
-|------|----------|------|
-| OpenAI | Bearer Token | 标准 OpenAI API |
-| Anthropic | x-api-key | Claude 系列模型 |
-| Google Gemini | Query Parameter | 使用 OpenAI 兼容端点 |
-| Azure OpenAI | api-key Header | 需配置 Deployment 名 |
-| Custom | Bearer Token | 兼容 OpenAI 格式的第三方服务 |
+| 渠道          | 认证方式        | 说明                         |
+| ------------- | --------------- | ---------------------------- |
+| OpenAI        | Bearer Token    | 标准 OpenAI API              |
+| Anthropic     | x-api-key       | Claude 系列模型              |
+| Google Gemini | Query Parameter | 使用 OpenAI 兼容端点         |
+| Azure OpenAI  | api-key Header  | 需配置 Deployment 名         |
+| Custom        | Bearer Token    | 兼容 OpenAI 格式的第三方服务 |
 
 ## 🛡️ 熔断与容错
 
@@ -78,6 +82,10 @@ api-switch.db           # 数据库（首次运行自动创建）
 ## 📜 开源协议
 
 [MIT License](LICENSE)
+
+## ⚠️ 免责声明
+
+本项目为公开项目，供个人便捷管理和使用 API。不对数据做加密处理，用户需自行负责数据安全。
 
 ## ⭐ Star
 
