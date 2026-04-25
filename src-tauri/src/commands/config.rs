@@ -2,7 +2,7 @@ use crate::database::AppSettings;
 use crate::error::AppError;
 use crate::AppState;
 use serde::Deserialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 const GITHUB_REPO: &str = "wang1970/API-Switch";
 
@@ -14,7 +14,7 @@ struct GithubRelease {
 }
 
 #[tauri::command]
-pub async fn check_update(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, AppError> {
+pub async fn check_update() -> Result<Option<serde_json::Value>, AppError> {
     let current = env!("CARGO_PKG_VERSION");
 
     let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
@@ -46,14 +46,11 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<Option<serde_json::Va
         return Ok(None);
     }
 
-    let update_info = serde_json::json!({
+    Ok(Some(serde_json::json!({
         "current": current,
         "latest": latest,
         "url": release.html_url,
-    });
-
-    let _ = app.emit("update-available", &update_info);
-    Ok(Some(update_info))
+    })))
 }
 
 fn sync_autostart(settings: &AppSettings) {

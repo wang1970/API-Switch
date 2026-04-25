@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
 import {
   Layers,
   Route,
@@ -46,27 +45,30 @@ export default function App() {
   });
 
   const [guideOpen, setGuideOpen] = useState(true);
+  const [updateChecked, setUpdateChecked] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{ current: string; latest: string; url: string } | null>(null);
 
-  // Check for updates on startup
+  // Check for updates once after guide is dismissed (or immediately if no guide)
+  const doCheckUpdate = async () => {
+    if (updateChecked) return;
+    setUpdateChecked(true);
+    const result = await checkUpdate();
+    if (result) setUpdateInfo(result);
+  };
+
+  const handleGuideDismiss = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      updateSettings({ ...settings!, show_guide: false });
+    }
+    doCheckUpdate();
+  };
+
+  // If no guide shown, check immediately
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const unlisten = await listen<{ current: string; latest: string; url: string }>(
-        "update-available",
-        (event) => {
-          if (mounted) setUpdateInfo(event.payload);
-        }
-      );
-      // Now listener is ready, check for updates
-      await checkUpdate();
-      // Cleanup
-      return () => {
-        mounted = false;
-        unlisten();
-      };
-    })();
-  }, []);
+    if (settings?.show_guide === false) {
+      doCheckUpdate();
+    }
+  }, [settings?.show_guide]);
 
   // Apply locale and theme
   useEffect(() => {
@@ -92,12 +94,6 @@ export default function App() {
       }
     }
   }, [settings]);
-
-  const handleGuideDismiss = (dontShowAgain: boolean) => {
-    if (dontShowAgain) {
-      updateSettings({ ...settings!, show_guide: false });
-    }
-  };
 
   const renderPage = () => {
     switch (currentPage) {
