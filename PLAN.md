@@ -310,8 +310,6 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [ ] **流超时保护**: 当前无流式超时，上游挂死会无限等待。参考 NEW-API `streamingTimeout` ticker（默认 300s）
 - [ ] **客户端断开检测**: 客户端断开后仍等待上游完成。参考 NEW-API `c.Request.Context().Done()` 主动检测
 - [ ] **实时日志推送**: 当前日志靠轮询，可改为 Tauri Event 实时推送
-- [ ] **日志导出**: 支持导出 CSV/JSON
-- [ ] **API Key 安全**: 当前 api_key 明文存储在 SQLite，建议加密或使用系统密钥链
 - [ ] **请求/响应 Mock**: 前端开发时缺少 Mock 数据，开发体验不佳
 - [ ] **错误提示优化**: 前端统一的 Toast 错误提示
 - [ ] **响应式布局**: 当前 min 800×600，小屏适配
