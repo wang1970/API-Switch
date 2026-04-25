@@ -3,6 +3,7 @@ use super::handlers::ProxyError;
 use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, Database};
+use tauri::Emitter;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -40,6 +41,7 @@ struct ForwardResult {
 struct StreamLogGuard {
     logged: Arc<AtomicBool>,
     db: Arc<Database>,
+    app_handle: tauri::AppHandle,
     access_key: Option<AccessKey>,
     entry: ApiEntry,
     requested_model: String,
@@ -54,7 +56,7 @@ impl Drop for StreamLogGuard {
     fn drop(&mut self) {
         if !self.logged.swap(true, Ordering::SeqCst) {
             log_usage(
-                &self.db, self.access_key.as_ref(), &self.entry, &self.requested_model,
+                &self.db, &self.app_handle, self.access_key.as_ref(), &self.entry, &self.requested_model,
                 true, self.prompt_tokens.load(Ordering::SeqCst),
                 self.completion_tokens.load(Ordering::SeqCst),
                 self.first_token_ms.load(Ordering::SeqCst),
@@ -118,7 +120,7 @@ pub async fn forward_with_retry(
                 if !is_stream {
                     let latency_ms = elapsed.as_millis() as i64;
                     log_usage(
-                        &state.db, access_key, entry, requested_model,
+                        &state.db, &state.app_handle, access_key, entry, requested_model,
                         is_stream, result.prompt_tokens, result.completion_tokens,
                         result.first_token_ms, latency_ms, result.status_code, true, None,
                     );
@@ -132,7 +134,7 @@ pub async fn forward_with_retry(
 
                 // Step 1: Always write usage log for every failed attempt
                 log_usage(
-                    &state.db, access_key, entry, requested_model,
+                    &state.db, &state.app_handle, access_key, entry, requested_model,
                     is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
                 );
 
@@ -335,6 +337,7 @@ fn build_streaming_response(
 ) -> axum::response::Response {
     let start = request_start;
     let db = state.db.clone();
+    let app_handle = state.app_handle.clone();
     let entry = entry.clone();
     let access_key = access_key.cloned();
     let requested_model = requested_model.to_string();
@@ -350,6 +353,7 @@ fn build_streaming_response(
     let guard = StreamLogGuard {
         logged: logged.clone(),
         db: db.clone(),
+        app_handle: app_handle.clone(),
         access_key: access_key.clone(),
         entry: entry.clone(),
         requested_model: requested_model.clone(),
@@ -388,7 +392,7 @@ fn build_streaming_response(
             Poll::Ready(Some(Err(err))) => {
                 if !logged.swap(true, Ordering::SeqCst) {
                     log_usage(
-                        &db, access_key.as_ref(), &entry, &requested_model,
+                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                         true, prompt_tokens.load(Ordering::SeqCst),
                         completion_tokens.load(Ordering::SeqCst),
                         first_token_ms.load(Ordering::SeqCst),
@@ -401,7 +405,7 @@ fn build_streaming_response(
             Poll::Ready(None) => {
                 if !logged.swap(true, Ordering::SeqCst) {
                     log_usage(
-                        &db, access_key.as_ref(), &entry, &requested_model,
+                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                         true, prompt_tokens.load(Ordering::SeqCst),
                         completion_tokens.load(Ordering::SeqCst),
                         first_token_ms.load(Ordering::SeqCst),
@@ -511,7 +515,8 @@ async fn record_circuit_failure(state: &ProxyState, entry_id: &str) {
 }
 
 fn log_usage(
-    db: &crate::database::Database,
+    db: &Database,
+    app_handle: &tauri::AppHandle,
     access_key: Option<&AccessKey>,
     entry: &ApiEntry,
     requested_model: &str,
@@ -544,4 +549,6 @@ fn log_usage(
         first_token_ms, use_time, status_code, success,
         "", "default", &other, error_message, None,
     );
+
+    let _ = app_handle.emit("new-usage-log", ());
 }

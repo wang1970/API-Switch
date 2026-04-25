@@ -1,6 +1,7 @@
-import { useState, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, Fragment, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -9,9 +10,20 @@ import type { UsageLogFilter } from "@/types";
 
 export function LogPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<UsageLogFilter>({ page: 1, page_size: 100 });
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  // Real-time log push
+  useEffect(() => {
+    const unlisten = listen("new-usage-log", () => {
+      queryClient.invalidateQueries({ queryKey: ["usageLogs"] });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [queryClient]);
 
   const { data: result, isLoading } = useQuery({
     queryKey: ["usageLogs", filter],

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tauri::Emitter;
 use tokio::sync::{oneshot, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -22,6 +23,7 @@ pub struct ProxyStatus {
 pub struct ProxyState {
     pub db: Arc<Database>,
     pub circuit_breakers: Arc<RwLock<HashMap<String, CircuitBreaker>>>,
+    pub app_handle: tauri::AppHandle,
 }
 
 /// HTTP proxy server
@@ -32,10 +34,11 @@ pub struct ProxyServer {
 }
 
 impl ProxyServer {
-    pub fn new(port: i32, db: Arc<Database>) -> Self {
+    pub fn new(port: i32, db: Arc<Database>, app_handle: tauri::AppHandle) -> Self {
         let state = ProxyState {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            app_handle,
         };
 
         Self {

@@ -43,7 +43,7 @@ pub fn run() {
                 if let Ok(settings) = app_state.db.get_settings() {
                     if settings.proxy_enabled {
                         let port = settings.listen_port;
-                        let server = ProxyServer::new(port, app_state.db.clone());
+                        let server = ProxyServer::new(port, app_state.db.clone(), handle.clone());
                         if let Err(e) = server.start().await {
                             log::error!("Failed to auto-start proxy: {e}");
                         } else {

@@ -14,7 +14,7 @@ pub fn refresh_tray_menu(app: tauri::AppHandle) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn start_proxy(state: State<'_, AppState>) -> Result<ProxyStatus, AppError> {
+pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<ProxyStatus, AppError> {
     let settings = state.db.get_settings()?;
     let port = settings.listen_port;
 
@@ -23,7 +23,7 @@ pub async fn start_proxy(state: State<'_, AppState>) -> Result<ProxyStatus, AppE
         return Err(AppError::Proxy("Proxy already running".to_string()));
     }
 
-    let server = crate::proxy::ProxyServer::new(port, state.db.clone());
+    let server = crate::proxy::ProxyServer::new(port, state.db.clone(), app);
     server.start().await.map_err(|e| AppError::Proxy(e.to_string()))?;
 
     let status = ProxyStatus {
