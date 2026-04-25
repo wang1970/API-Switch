@@ -19,6 +19,9 @@ import { TokenPage } from "@/pages/TokenPage";
 import { LogPage } from "@/pages/LogPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { WelcomeGuide } from "@/components/WelcomeGuide";
+import { useQuery } from "@tanstack/react-query";
+import { getSettings, updateSettings } from "@/lib/api";
 
 type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings";
 
@@ -34,6 +37,19 @@ const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string }[] = [
 export default function App() {
   const { t } = useTranslation();
   const [currentPage, setCurrentPage] = useState<Page>("apiPool");
+
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: getSettings,
+  });
+
+  const [guideOpen, setGuideOpen] = useState(true);
+
+  const handleGuideDismiss = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      updateSettings({ ...settings!, show_guide: false });
+    }
+  };
 
   const renderPage = () => {
     switch (currentPage) {
@@ -83,12 +99,28 @@ export default function App() {
             ))}
           </nav>
         </ScrollArea>
+
+        {/* Star on GitHub */}
+        <div className="flex justify-center pb-4">
+          <a href="https://github.com/wang1970/API-Switch" target="_blank" rel="noopener noreferrer">
+            <img src="/star.jpg" alt="Star on GitHub" className="cursor-pointer hover:opacity-80 transition-opacity" />
+          </a>
+        </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
         {renderPage()}
       </main>
+
+      {/* Welcome Guide - show on first launch */}
+      {settings?.show_guide !== false && (
+        <WelcomeGuide
+          open={guideOpen}
+          onOpenChange={setGuideOpen}
+          onDismiss={handleGuideDismiss}
+        />
+      )}
     </div>
   );
 }

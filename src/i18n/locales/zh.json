@@ -239,6 +239,27 @@
     "loading": "加载中...",
     "error": "错误",
     "success": "成功",
-    "noData": "暂无数据"
+    "noData": "暂无数据",
+    "doNotShowAgain": "不再提示"
+  },
+  "guide": {
+    "title": "快速上手",
+    "description": "API Switch 核心特色：",
+    "step1": {
+      "title": "永不中断",
+      "desc": "模型填 auto 自动匹配最优渠道；指定模型在渠道失效后会自动回退到可用渠道，保证服务不中断"
+    },
+    "step2": {
+      "title": "添加渠道",
+      "desc": "进入「渠道管理」添加你的 API 渠道，拉取并选择需要使用的模型"
+    },
+    "step3": {
+      "title": "启用模型",
+      "desc": "在「API 管理」中开启模型条目，开启后即可参与自动路由"
+    },
+    "step4": {
+      "title": "开始使用",
+      "desc": "代理已自动启动，将客户端 API 地址指向 http://127.0.0.1:9090，模型填 auto 或指定模型名，无需 API Key"
+    }
   }
 }

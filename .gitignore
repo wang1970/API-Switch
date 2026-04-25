@@ -25,3 +25,17 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Design assets (not for repo)
+design/
+/icon.jpg
+/icon1.png
+/icon2.png
+/icon3.png
+/icon4.png
+/icon5.png
+/star.jpg
+四款程序ICON设计方案*

@@ -1,7 +1,7 @@
 # API Switch - 项目计划书
 
 > Personal API Management & Forwarding Center
-> 版本: 0.1.6-dev | 生成日期: 2026-04-25
+> 版本: 0.1.0 | 生成日期: 2026-04-25
 
 ---
 
@@ -306,6 +306,7 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] **AppState Clone**: 支持 Clone 以便 TrayIconBuilder 闭包捕获
 
 ### P2 — 体验优化
+- [ ] **验证 auto 模式模型名透传**: 用户用 `model: "auto"` 对话时，客户端 UI 应显示实际使用的模型名（如 `glm-5-turbo`）。因为 `transform_request` 会把 body 里的 model 替换为实际模型名，上游响应会带实际模型名透传回客户端。需实际测试验证链路是否完整。
 - [ ] **SSE Ping 保活**: 长思考模型（o1/o3）可能在 30-60s 后因反向代理超时断开。参考 NEW-API `startPingKeepAlive` goroutine，可配置间隔发送 `: PING\n\n`
 - [ ] **流超时保护**: 当前无流式超时，上游挂死会无限等待。参考 NEW-API `streamingTimeout` ticker（默认 300s）
 - [ ] **客户端断开检测**: 客户端断开后仍等待上游完成。参考 NEW-API `c.Request.Context().Done()` 主动检测
@@ -347,7 +348,7 @@ pnpm typecheck        # TypeScript 类型检查
 pnpm build            # 生产构建
 
 # 数据库位置
-# Windows: %LOCALAPPDATA%/api-switch/api-switch.db (自动创建)
+# Windows: EXE 同目录下 api-switch.db（绿色便携版，自动创建）
 ```
 
 ---
@@ -498,6 +499,24 @@ fn build_streaming_response(...) -> axum::response::Response {
 ---
 
 ## 10. 变更日志
+
+### 2026-04-25 — v0.1.0 首版发布准备
+
+**改动文件**: 15 个文件
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **绿色便携版** | 数据库路径从 `%LOCALAPPDATA%/api-switch/` 改为 EXE 同目录 `api-switch.db`，移除 `dirs` 依赖 |
+| 2 | **关闭安装包打包** | `bundle.active` 改为 `false`，只生成裸 EXE |
+| 3 | **代理默认启动** | `proxy_enabled` 默认值从 `false` 改为 `true`，首次启动自动开启代理 |
+| 4 | **托盘菜单刷新 command** | 新增 `refresh_tray_menu` Tauri command，放在 `commands/proxy_cmd.rs` 避免 E0255 宏冲突 |
+| 5 | **AppError 扩展** | 新增 `From<tauri::Error>` 实现 |
+| 6 | **首次启动引导弹窗** | `WelcomeGuide.tsx` 组件，4 步引导（特色+流程），`show_guide` 配置控制，勾选不再提示 |
+| 7 | **系统语言检测** | i18n 初始化按系统语言匹配：`zh*` 用中文，其余英文；用户选择后按用户偏好 |
+| 8 | **侧边栏 Star 链接** | 导航下方放置 `star.jpg`，点击跳转 GitHub |
+| 9 | **i18n 补充** | 中英文新增 `guide.*`、`common.doNotShowAgain` 翻译 |
+
+---
 
 ### 2026-04-25 — 核心转发流程对齐 NEW-API（v0.1.5-dev）
 

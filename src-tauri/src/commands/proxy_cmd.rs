@@ -1,7 +1,17 @@
 use crate::error::AppError;
 use crate::proxy::ProxyStatus;
 use crate::AppState;
-use tauri::State;
+use crate::TRAY_ID;
+use tauri::{Manager, State};
+
+#[tauri::command]
+pub fn refresh_tray_menu(app: tauri::AppHandle) -> Result<(), AppError> {
+    let new_menu = crate::build_tray_menu(&app)?;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_menu(Some(new_menu))?;
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn start_proxy(state: State<'_, AppState>) -> Result<ProxyStatus, AppError> {

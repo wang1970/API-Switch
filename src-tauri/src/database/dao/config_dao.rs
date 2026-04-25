@@ -16,12 +16,13 @@ pub struct AppSettings {
     pub theme: String,
     pub autostart: bool,
     pub start_minimized: bool,
+    pub show_guide: bool,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            proxy_enabled: false,
+            proxy_enabled: true,
             listen_port: 9090,
             access_key_required: false,
             circuit_failure_threshold: 4,
@@ -33,6 +34,7 @@ impl Default for AppSettings {
             disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized".to_string(),
             autostart: false,
             start_minimized: false,
+            show_guide: true,
         }
     }
 }
@@ -87,6 +89,9 @@ impl Database {
         if let Some(v) = kv.get("start_minimized") {
             settings.start_minimized = v == "1";
         }
+        if let Some(v) = kv.get("show_guide") {
+            settings.show_guide = v == "1";
+        }
 
         Ok(settings)
     }
@@ -126,6 +131,7 @@ impl Database {
                 "start_minimized",
                 if updates.start_minimized { "1" } else { "0" },
             ),
+            ("show_guide", if updates.show_guide { "1" } else { "0" }),
         ];
 
         for (key, value) in kv {

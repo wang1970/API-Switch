@@ -24,16 +24,15 @@ pub struct Database {
 }
 
 impl Database {
-    /// Open database at default location
+    /// Open database next to the executable (portable mode)
     pub fn open() -> Result<Self, AppError> {
-        let db_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("api-switch");
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| AppError::Database(format!("Failed to get exe path: {e}")))?
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        std::fs::create_dir_all(&db_dir)
-            .map_err(|e| AppError::Database(format!("Failed to create db dir: {e}")))?;
-
-        let db_path = db_dir.join("api-switch.db");
+        let db_path = exe_dir.join("api-switch.db");
         let conn = Connection::open(&db_path)
             .map_err(|e| AppError::Database(format!("Failed to open db: {e}")))?;
 

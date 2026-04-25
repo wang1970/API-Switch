@@ -125,7 +125,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
 
     // Insert default config values
     let defaults = [
-        ("proxy_enabled", "0"),
+        ("proxy_enabled", "1"),
         ("listen_port", "9090"),
         ("access_key_required", "0"),
         ("circuit_failure_threshold", "4"),
@@ -135,6 +135,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("disable_keywords", "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized"),
         ("locale", "zh"),
         ("theme", "system"),
+        ("show_guide", "1"),
     ];
 
     for (key, value) in defaults {

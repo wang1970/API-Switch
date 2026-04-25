@@ -18,7 +18,7 @@ pub struct AppState {
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
 }
 
-const TRAY_ID: &str = "api-switch-tray";
+pub(crate) const TRAY_ID: &str = "api-switch-tray";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -126,13 +126,14 @@ pub fn run() {
             commands::proxy_cmd::start_proxy,
             commands::proxy_cmd::stop_proxy,
             commands::proxy_cmd::get_proxy_status,
+            commands::proxy_cmd::refresh_tray_menu,
             commands::test_chat::test_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let entries = app.state::<AppState>()
         .db.get_enabled_entries_for_routing()
         .unwrap_or_default();

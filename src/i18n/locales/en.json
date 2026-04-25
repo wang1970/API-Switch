@@ -239,6 +239,27 @@
     "loading": "Loading...",
     "error": "Error",
     "success": "Success",
-    "noData": "No data"
+    "noData": "No data",
+    "doNotShowAgain": "Don't show again"
+  },
+  "guide": {
+    "title": "Quick Start",
+    "description": "What makes API Switch special:",
+    "step1": {
+      "title": "Never Goes Down",
+      "desc": "Set model to auto to match the best channel automatically; when using a specific model and the channel fails, it falls back to an available one — zero downtime guaranteed"
+    },
+    "step2": {
+      "title": "Add Channels",
+      "desc": "Go to「Channels」to add your API providers, then fetch and select the models you need"
+    },
+    "step3": {
+      "title": "Enable Models",
+      "desc": "In「API Mgmt」, enable the model entries you want to include in routing"
+    },
+    "step4": {
+      "title": "Start Using",
+      "desc": "Proxy is auto-started. Point your client to http://127.0.0.1:9090, set model to auto or any specific name, no API Key needed"
+    }
   }
 }

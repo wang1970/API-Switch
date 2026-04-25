@@ -15,19 +15,22 @@ impl Database {
     pub fn list_access_keys(&self) -> Result<Vec<AccessKey>, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
-            "SELECT id, name, key, enabled, created_at FROM access_keys ORDER BY created_at"
+            "SELECT id, name, key, enabled, created_at FROM access_keys ORDER BY created_at",
         )?;
 
-        let keys = stmt.query_map([], |row| {
-            let enabled: i32 = row.get(3)?;
-            Ok(AccessKey {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                key: row.get(2)?,
-                enabled: enabled != 0,
-                created_at: row.get(4)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let keys = stmt
+            .query_map([], |row| {
+                let enabled: i32 = row.get(3)?;
+                Ok(AccessKey {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    key: row.get(2)?,
+                    enabled: enabled != 0,
+                    created_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(keys)
     }

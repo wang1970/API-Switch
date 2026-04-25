@@ -41,3 +41,9 @@ impl From<reqwest::Error> for AppError {
         AppError::Network(e.to_string())
     }
 }
+
+impl From<tauri::Error> for AppError {
+    fn from(e: tauri::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}

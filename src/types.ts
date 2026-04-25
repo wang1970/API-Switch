@@ -204,6 +204,7 @@ export interface AppSettings {
   theme: "light" | "dark" | "system";
   autostart: boolean;
   start_minimized: boolean;
+  show_guide: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -219,6 +220,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   autostart: false,
   start_minimized: false,
+  show_guide: true,
 };
 
 // --- Proxy ---

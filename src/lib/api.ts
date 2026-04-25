@@ -156,3 +156,9 @@ export async function stopProxy(): Promise<void> {
 export async function getProxyStatus(): Promise<ProxyStatus> {
   return invoke("get_proxy_status");
 }
+
+// --- Tray ---
+
+export async function refreshTrayMenu(): Promise<void> {
+  return invoke("refresh_tray_menu");
+}
