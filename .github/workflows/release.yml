@@ -66,11 +66,21 @@ jobs:
       - name: Build
         run: pnpm tauri build --target ${{ matrix.target }}
 
+      - name: Prepare artifact (rename)
+        shell: bash
+        run: |
+          mkdir -p artifact
+          if [ "${{ matrix.asset }}" = "api-switch.exe" ]; then
+            cp src-tauri/target/${{ matrix.target }}/release/api-switch.exe artifact/
+          else
+            cp src-tauri/target/${{ matrix.target }}/release/api-switch artifact/${{ matrix.asset }}
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: src-tauri/target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          path: artifact/*
 
   publish:
     needs: release
