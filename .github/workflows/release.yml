@@ -15,12 +15,20 @@ jobs:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            artifact: api-switch.exe
+            asset: api-switch-windows-x64.exe
           - platform: macos-latest
             target: x86_64-apple-darwin
+            artifact: api-switch
+            asset: api-switch-macos-x64
           - platform: macos-latest
             target: aarch64-apple-darwin
+            artifact: api-switch
+            asset: api-switch-macos-arm64
           - platform: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            artifact: api-switch
+            asset: api-switch-linux-x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -60,14 +68,45 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        working-directory: src-tauri
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: See the [full changelog](https://github.com/wang1970/API-Switch/blob/master/PLAN.md).
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.target }}
+          name: ${{ matrix.asset }}
+          path: src-tauri/target/${{ matrix.target }}/release/${{ matrix.artifact }}
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          name: ${{ github.ref_name }}
+          body: |
+            ## API Switch ${{ github.ref_name }}
+
+            Portable single-file build. Download for your platform:
+
+            - `api-switch-windows-x64.exe` — Windows
+            - `api-switch-macos-x64` — macOS Intel
+            - `api-switch-macos-arm64` — macOS Apple Silicon
+            - `api-switch-linux-x64` — Linux
+
+            ### Usage
+            1. Download and run
+            2. Database is auto-created in the same directory
+            3. Point your client to `http://127.0.0.1:9090`
