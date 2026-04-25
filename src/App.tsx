@@ -23,6 +23,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { useQuery } from "@tanstack/react-query";
 import { getSettings, updateSettings, checkUpdate } from "@/lib/api";
+import { useDragScroll } from "@/lib/useDragScroll";
 
 type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings";
 
@@ -38,6 +39,8 @@ const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string }[] = [
 export default function App() {
   const { t, i18n } = useTranslation();
   const [currentPage, setCurrentPage] = useState<Page>("apiPool");
+  const sidebarRef = useDragScroll<HTMLDivElement>();
+  const mainRef = useDragScroll<HTMLElement>();
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],
@@ -138,8 +141,7 @@ export default function App() {
         </div>
       )}
       <div className="flex flex-1 min-h-0">
-      {/* Sidebar */}
-      <aside className="flex w-56 flex-col border-r border-sidebar-border bg-sidebar-background">
+      <aside ref={sidebarRef} className="flex w-56 flex-col border-r border-sidebar-border bg-sidebar-background">
         {/* Logo */}
         <div className="flex items-center gap-2 px-4 py-4">
           <Power className="h-5 w-5 text-primary" />
@@ -176,8 +178,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main ref={mainRef} className="flex-1 overflow-auto">
         {renderPage()}
       </main>
 
