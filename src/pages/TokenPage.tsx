@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2, Copy } from "lucide-react";
+import { Plus, Trash2, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -54,7 +54,7 @@ export function TokenPage() {
   const copyKey = async (key: string, id: string) => {
     await navigator.clipboard.writeText(key);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    setTimeout(() => setCopiedId(null), 3000);
   };
 
   if (isLoading) {
@@ -87,11 +87,12 @@ export function TokenPage() {
                     className="h-6 w-6"
                     onClick={() => copyKey(key.key, key.id)}
                   >
-                    <Copy className="h-3 w-3" />
+                    {copiedId === key.id ? (
+                      <Check className="h-3 w-3 text-green-600" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
                   </Button>
-                  {copiedId === key.id && (
-                    <span className="text-xs text-green-600">{t("token.copied")}</span>
-                  )}
                 </div>
               </div>
               <Switch
