@@ -95,11 +95,18 @@ export function TokenPage() {
                     <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                       {key.key.slice(0, 8)}...{key.key.slice(-4)}
                     </code>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={key.enabled ? "text-green-600" : "text-muted-foreground"}>
-                      {key.enabled ? t("token.active") : t("token.disabled")}
-                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                      onClick={() => copyKey(key.key, key.id)}
+                    >
+                      {copiedId === key.id ? (
+                        <Check className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(key.created_at)}</td>
                   <td className="px-4 py-3">
