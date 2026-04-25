@@ -362,7 +362,7 @@ pnpm build            # 生产构建
 | 8 | ~~上游状态码不透传~~ | ~~🔴高~~ | ✅ 已修复：`ProxyError::Upstream` 透传 |
 | 9 | ~~first_token_ms 永远为 0~~ | ~~🔴高~~ | ✅ 已修复：`Instant::now()` 移到 `request.send()` 之前 |
 | 10 | ~~三机制未生效~~ | ~~🔴高~~ | ✅ 已修复：DB migration 补默认值 + 副作用与重试分离 |
-| 11 | Release 构建未完成 | 🟡中 | cargo check 通过，`cargo build --release` 超时未完成，需手动构建 |
+| 11 | ~~Release 构建未完成~~ | ~~🟡中~~ | ✅ v0.1.0 已通过 GitHub Actions CI/CD 成功发布 4 平台 |
 
 ---
 
@@ -433,7 +433,7 @@ api-switch/
 └── PLAN.md                                 # ← 本文件
 ```
 
-## 9. 已知问题 & 待修复 BUG
+## 10. 已知问题 & 待修复 BUG
 
 ### 🔴 P0 — 影响正常使用
 
@@ -451,49 +451,16 @@ api-switch/
 | 4 | ~~**配置驱动的错误路由**~~ | ✅ 已实现并验证：`circuit_disable_codes`/`circuit_retry_codes`/`disable_keywords` 三机制完整接入，参考 NEW-API `processChannelError` + `shouldRetry` 分离模式 |
 | 5 | **Gemini 原生格式验证** | `gemini.rs` 中原生格式转换函数已实现但未接入 trait |
 | 6 | **Azure deployment 验证** | `azure.rs` 已实现完整路径+api-key+模型列表解析，待有 Azure 资源端到端验证 |
-| 7 | **请求速率限制** | 当前无 RPM/TPM 限流 |
 
-### 📝 流式日志修复方案（待实现）
+### 📝 流式日志修复方案（已实现）
 
-**问题**：`futures::stream::poll_fn` 的 `move` 闭包捕获的变量和返回的 stream 生命周期一致，但之前尝试把 `StreamLogGuard` 放在闭包内部会每次 poll 都重建并 drop。
+~~**问题**：`futures::stream::poll_fn` 的 `move` 闭包捕获的变量和返回的 stream 生命周期一致，但之前尝试把 `StreamLogGuard` 放在闭包内部会每次 poll 都重建并 drop。~~
 
-**正确方案**：
-
-```rust
-fn build_streaming_response(...) -> axum::response::Response {
-    let guard = StreamLogGuard { ... };  // 在闭包外创建
-    let logged = Arc::new(AtomicBool::new(false));
-
-    let body_stream = futures::stream::poll_fn(move |cx| -> Poll<...> {
-        // guard 在 move 闭包的捕获列表中，生命周期和 stream 绑定
-        let _guard = &guard;  // 借用 guard（不拥有），保证不 drop
-        
-        match upstream_stream.as_mut().poll_next(cx) {
-            Poll::Ready(None) => {
-                if !logged.swap(true, Ordering::Relaxed) {
-                    log_usage(...);  // 正常结束写日志
-                }
-                Poll::Ready(None)
-            }
-            // ... 其他分支
-        }
-    });
-
-    // 返回 response，guard 的实际生命周期和 body_stream 绑定
-    axum::Response::builder().body(Body::from_stream(body_stream))
-}
-```
-
-**关键点**：`StreamLogGuard` 必须在 `poll_fn` 闭包的 `move` 捕获列表中，这样它的生命周期和返回的 `body_stream` 一致。stream 被 drop 时 guard 自动 drop 触发 `Drop::drop()` 写日志。`Ready(None)` 路径先 `logged.swap(true)` 写日志，guard 的 `Drop` 发现 `logged=true` 就跳过，避免重复。
-
-**之前尝试失败的 3 次**：
-1. `f520356` — 成功时立即写日志 → 流式写两条（立即 0 token + 结束有 token）
-2. `792163e` — guard 在 `build_streaming_response` 函数作用域 → 函数返回时 drop，比 stream 早
-3. `9234e1d` — `GuardHolder(Option<StreamLogGuard>)` 在闭包内 → 局部变量每次 poll 都 drop
+✅ 已通过 `StreamLogGuard` 在 `poll_fn` 的 `move` 闭包中捕获解决，生命周期和 stream body 绑定。
 
 ---
 
-## 10. 变更日志
+## 11. 变更日志
 
 ### 2026-04-25 — v0.1.0 首版发布准备
 
