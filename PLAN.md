@@ -304,6 +304,12 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] **关闭窗口隐藏到托盘**: 拦截 `CloseRequested`，`prevent_close()` + `hide()` 替代退出，退出仅通过托盘菜单 "Exit"
 - [x] **托盘设置**: `autostart` 通过 `auto-launch` crate 注册/注销系统开机自启；`start_minimized` 控制启动时是否隐藏窗口
 - [x] **AppState Clone**: 支持 Clone 以便 TrayIconBuilder 闭包捕获
+- [x] **绿色便携版**: 数据库路径跟随 EXE 同目录，移除 `dirs` 依赖，单文件拷走即用
+- [x] **代理默认启动**: `proxy_enabled` 默认 `true`，首次启动自动开启代理
+- [x] **托盘菜单刷新**: `refresh_tray_menu` command，渠道/API 变更后可刷新托盘菜单
+- [x] **首次启动引导**: `WelcomeGuide` 弹窗，4 步引导（特色+流程），`show_guide` 配置控制不再提示
+- [x] **系统语言检测**: i18n 初始化按系统语言匹配（`zh*` 用中文，其余英文），用户选择后按偏好
+- [x] **GitHub Actions CI/CD**: 推送 tag 自动编译 Windows/macOS/Linux 多平台版本
 
 ### P2 — 体验优化
 - [ ] **验证 auto 模式模型名透传**: 用户用 `model: "auto"` 对话时，客户端 UI 应显示实际使用的模型名（如 `glm-5-turbo`）。因为 `transform_request` 会把 body 里的 model 替换为实际模型名，上游响应会带实际模型名透传回客户端。需实际测试验证链路是否完整。
@@ -321,7 +327,6 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 ### P3 — 未来愿景
 - [ ] **重试路径记录**: 日志中记录 `重试: channel1->channel2->channel3`，参考 NEW-API `use_channel` 切片
 - [ ] **流结束原因追踪**: `StreamEndReason` 枚举（done/timeout/client_gone/scanner_error），参考 NEW-API `StreamStatus`
-- [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史
 - [ ] **多用户隔离**: 按 Access Key 做用量配额限制
 - [ ] **Web UI**: 除桌面端外提供 Web 管理界面
 - [ ] **插件系统**: 支持自定义中间件（如日志脱敏、请求改写）
