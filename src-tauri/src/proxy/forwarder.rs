@@ -10,10 +10,92 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures::Stream;
 use serde_json::Value;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
+
+const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+const STREAMING_PING_INTERVAL: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone, Copy)]
+enum StreamEndReason {
+    Done,
+    UpstreamError,
+    Timeout,
+    Dropped,
+}
+
+impl StreamEndReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            StreamEndReason::Done => "done",
+            StreamEndReason::UpstreamError => "upstream_error",
+            StreamEndReason::Timeout => "timeout",
+            StreamEndReason::Dropped => "dropped",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AttemptInfo {
+    entry_id: String,
+    channel_name: String,
+    model: String,
+    status_code: i32,
+    success: bool,
+    error: Option<String>,
+}
+
+fn attempt_path_json(attempts: &[AttemptInfo]) -> String {
+    serde_json::to_string(
+        &attempts
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "entry_id": a.entry_id,
+                    "channel": a.channel_name,
+                    "model": a.model,
+                    "status_code": a.status_code,
+                    "success": a.success,
+                    "error": a.error,
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+    .unwrap_or_else(|_| "[]".to_string())
+}
+
+fn push_attempt(
+    attempts: &mut Vec<AttemptInfo>,
+    entry: &ApiEntry,
+    status_code: i32,
+    success: bool,
+    error: Option<String>,
+) {
+    attempts.push(AttemptInfo {
+        entry_id: entry.id.clone(),
+        channel_name: entry.channel_name.clone().unwrap_or_else(|| "unknown".to_string()),
+        model: entry.model.clone(),
+        status_code,
+        success,
+        error,
+    });
+}
+
+fn attempt_path_with_current(
+    prior_attempts: &[AttemptInfo],
+    entry: &ApiEntry,
+    status_code: i32,
+    success: bool,
+    error: Option<String>,
+) -> String {
+    let mut attempts = prior_attempts.to_vec();
+    push_attempt(&mut attempts, entry, status_code, success, error);
+    attempt_path_json(&attempts)
+}
 
 /// Parse newline-separated keywords into lowercase Vec.
 fn parse_keywords(input: &str) -> Vec<String> {
@@ -50,18 +132,27 @@ struct StreamLogGuard {
     first_token_ms: Arc<AtomicI64>,
     status_code: i32,
     start: Instant,
+    prior_attempts: Vec<AttemptInfo>,
 }
 
 impl Drop for StreamLogGuard {
     fn drop(&mut self) {
         if !self.logged.swap(true, Ordering::SeqCst) {
+            let attempt_path = attempt_path_with_current(
+                &self.prior_attempts,
+                &self.entry,
+                self.status_code,
+                false,
+                Some("stream dropped before normal completion".to_string()),
+            );
             log_usage(
                 &self.db, &self.app_handle, self.access_key.as_ref(), &self.entry, &self.requested_model,
                 true, self.prompt_tokens.load(Ordering::SeqCst),
                 self.completion_tokens.load(Ordering::SeqCst),
                 self.first_token_ms.load(Ordering::SeqCst),
                 self.start.elapsed().as_millis() as i64,
-                self.status_code, true, None,
+                self.status_code, false, Some("stream dropped before normal completion"),
+                Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
             );
         }
     }
@@ -98,6 +189,7 @@ pub async fn forward_with_retry(
         .unwrap_or_default();
 
     let mut last_error: Option<(String, u16)> = None;
+    let mut attempts: Vec<AttemptInfo> = Vec::new();
 
     for entry in entries {
         let start = Instant::now();
@@ -112,17 +204,20 @@ pub async fn forward_with_retry(
             }
         }
 
-        match forward_single(state, entry, body, requested_model, access_key, is_stream).await {
+        match forward_single(state, entry, body, requested_model, access_key, is_stream, attempts.clone()).await {
             Ok(result) => {
                 let elapsed = start.elapsed();
-                record_circuit_success(state, &entry.id).await;
 
                 if !is_stream {
+                    record_circuit_success(state, &entry.id).await;
+                    push_attempt(&mut attempts, entry, result.status_code, true, None);
+                    let attempt_path = attempt_path_json(&attempts);
                     let latency_ms = elapsed.as_millis() as i64;
                     log_usage(
                         &state.db, &state.app_handle, access_key, entry, requested_model,
                         is_stream, result.prompt_tokens, result.completion_tokens,
                         result.first_token_ms, latency_ms, result.status_code, true, None,
+                        Some(attempt_path.as_str()), None,
                     );
                 }
                 return Ok(result.response);
@@ -131,11 +226,14 @@ pub async fn forward_with_retry(
                 let elapsed = start.elapsed();
                 let latency_ms = elapsed.as_millis() as i64;
                 let log_status = if status > 0 { status as i32 } else { 502 };
+                push_attempt(&mut attempts, entry, log_status, false, Some(e.clone()));
+                let attempt_path = attempt_path_json(&attempts);
 
                 // Step 1: Always write usage log for every failed attempt
                 log_usage(
                     &state.db, &state.app_handle, access_key, entry, requested_model,
                     is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
+                    Some(attempt_path.as_str()), None,
                 );
 
                 // Step 2: process_entry_error — side effects only
@@ -187,6 +285,7 @@ struct ErrorAction {
 ///    4xx (401/403/429) are client/credential issues — failover but don't punish entry.
 ///
 /// 4. Retry decision:
+///    - status 0 / invalid status → YES retry (request/connect failure; same spirit as NEW-API code <100/>599)
 ///    - 504/524 → NO retry (gateway timeout, hardcoded)
 ///    - status in retry_codes → YES retry
 ///    - else → NO retry
@@ -223,19 +322,22 @@ async fn process_entry_error(
         let _ = state.db.toggle_entry(&entry.id, false);
     }
 
-    // 3. 504/524 gateway timeout → never retry (hardcoded, same as NEW-API)
-    if status == 504 || status == 524 {
-        return ErrorAction { should_retry: false };
-    }
-
-    // 4. Circuit breaker: only trip on server errors (5xx) and connection failures (0)
+    // 3. Circuit breaker: only trip on server errors (5xx) and connection failures (0)
     //    4xx (401/403/429) are client/credential issues — failover but don't punish entry
+    //    Keep this BEFORE retry decision: 504/524 do not retry, but still count as provider failure.
     if status >= 500 || status == 0 {
         record_circuit_failure(state, &entry.id).await;
     }
 
-    // 5. Retry decision based on retry_codes
-    let should_retry = retry_codes.contains(&status);
+    // 4. 504/524 gateway timeout → never retry (hardcoded, same as NEW-API)
+    if status == 504 || status == 524 {
+        return ErrorAction { should_retry: false };
+    }
+
+    // 5. Retry decision based on retry_codes.
+    // NEW-API retries invalid/non-HTTP status codes (`code < 100 || code > 599`).
+    // In our ForwardError model, request/connect failures are represented as status=0.
+    let should_retry = status == 0 || retry_codes.contains(&status);
 
     ErrorAction { should_retry }
 }
@@ -247,6 +349,7 @@ async fn forward_single(
     requested_model: &str,
     access_key: Option<&AccessKey>,
     is_stream: bool,
+    prior_attempts: Vec<AttemptInfo>,
 ) -> Result<ForwardResult, ForwardError> {
     let channel = state
         .db
@@ -259,9 +362,8 @@ async fn forward_single(
     let mut upstream_body = body.clone();
     adapter.transform_request(&mut upstream_body, &entry.model);
 
-    let client = reqwest::Client::new();
     let mut request = adapter
-        .apply_auth(client.post(&url), &channel.api_key)
+        .apply_auth(state.http_client.post(&url), &channel.api_key)
         .json(&upstream_body);
 
     if is_stream {
@@ -289,7 +391,7 @@ async fn forward_single(
         let needs_transform = adapter.needs_sse_transform();
         let response = build_streaming_response(
             state, entry, access_key, requested_model,
-            response, status_code, needs_transform, adapter, request_start,
+            response, status_code, needs_transform, adapter, request_start, prior_attempts,
         );
         Ok(ForwardResult {
             response, prompt_tokens: 0, completion_tokens: 0,
@@ -334,6 +436,7 @@ fn build_streaming_response(
     needs_transform: bool,
     adapter: Box<dyn super::protocol::ProtocolAdapter + Send>,
     request_start: std::time::Instant,
+    prior_attempts: Vec<AttemptInfo>,
 ) -> axum::response::Response {
     let start = request_start;
     let db = state.db.clone();
@@ -348,6 +451,12 @@ fn build_streaming_response(
     let logged = Arc::new(AtomicBool::new(false));
     let mut sse_buffer = String::new();
     let mut upstream_stream = Box::pin(response.bytes_stream());
+    let mut idle_timeout = Box::pin(sleep(STREAMING_IDLE_TIMEOUT));
+    let mut ping_interval = Box::pin(sleep(STREAMING_PING_INTERVAL));
+    let entry_id = entry.id.clone();
+    let circuit_breakers = state.circuit_breakers.clone();
+    let settings_db = state.db.clone();
+    let success_circuit_breakers = state.circuit_breakers.clone();
 
     // Guard captured by the move closure → lives as long as the stream body
     let guard = StreamLogGuard {
@@ -362,13 +471,46 @@ fn build_streaming_response(
         first_token_ms: first_token_ms.clone(),
         status_code,
         start,
+        prior_attempts: prior_attempts.clone(),
     };
 
     let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
         let _ = &guard; // keep guard alive in the closure's capture list
 
+        if ping_interval.as_mut().poll(cx).is_ready() {
+            ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
+            return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
+        }
+
+        if idle_timeout.as_mut().poll(cx).is_ready() {
+            if !logged.swap(true, Ordering::SeqCst) {
+                let attempt_path = attempt_path_with_current(
+                    &prior_attempts,
+                    &entry,
+                    504,
+                    false,
+                    Some("stream idle timeout".to_string()),
+                );
+                log_usage(
+                    &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
+                    true, prompt_tokens.load(Ordering::SeqCst),
+                    completion_tokens.load(Ordering::SeqCst),
+                    first_token_ms.load(Ordering::SeqCst),
+                    start.elapsed().as_millis() as i64,
+                    504, false, Some("stream idle timeout"),
+                    Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
+                );
+                spawn_record_circuit_failure(circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
+            }
+            return Poll::Ready(Some(Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "stream idle timeout",
+            ))));
+        }
+
         match upstream_stream.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(chunk))) => {
+                idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
                 if !seen_first_chunk.swap(true, Ordering::SeqCst) {
                     first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
                 }
@@ -391,19 +533,36 @@ fn build_streaming_response(
             }
             Poll::Ready(Some(Err(err))) => {
                 if !logged.swap(true, Ordering::SeqCst) {
+                    let error_message = format!("Stream error: {err}");
+                    let attempt_path = attempt_path_with_current(
+                        &prior_attempts,
+                        &entry,
+                        502,
+                        false,
+                        Some(error_message.clone()),
+                    );
                     log_usage(
                         &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                         true, prompt_tokens.load(Ordering::SeqCst),
                         completion_tokens.load(Ordering::SeqCst),
                         first_token_ms.load(Ordering::SeqCst),
                         start.elapsed().as_millis() as i64,
-                        502, false, Some(&format!("Stream error: {err}")),
+                        502, false, Some(error_message.as_str()),
+                        Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
                     );
+                    spawn_record_circuit_failure(circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
                 }
                 Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
             }
             Poll::Ready(None) => {
                 if !logged.swap(true, Ordering::SeqCst) {
+                    let attempt_path = attempt_path_with_current(
+                        &prior_attempts,
+                        &entry,
+                        status_code,
+                        true,
+                        None,
+                    );
                     log_usage(
                         &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                         true, prompt_tokens.load(Ordering::SeqCst),
@@ -411,7 +570,9 @@ fn build_streaming_response(
                         first_token_ms.load(Ordering::SeqCst),
                         start.elapsed().as_millis() as i64,
                         status_code, true, None,
+                        Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                     );
+                    spawn_record_circuit_success(success_circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
                 }
                 Poll::Ready(None)
             }
@@ -424,6 +585,7 @@ fn build_streaming_response(
         .header("content-type", "text/event-stream")
         .header("cache-control", "no-cache")
         .header("connection", "keep-alive")
+        .header("x-accel-buffering", "no")
         .body(Body::from_stream(body_stream))
         .unwrap()
 }
@@ -445,7 +607,7 @@ fn transform_sse_chunk(
 
         let Some(payload) = line.strip_prefix("data: ") else { continue };
         if payload == "[DONE]" {
-            output.push(b"data: [DONE]\n".to_vec());
+            output.push(b"data: [DONE]\n\n".to_vec());
             continue;
         }
 
@@ -454,7 +616,7 @@ fn transform_sse_chunk(
         if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
 
         if let Some(transformed) = adapter.transform_sse_line(payload) {
-            output.push(format!("data: {transformed}\n").into_bytes());
+            output.push(format!("data: {transformed}\n\n").into_bytes());
         }
     }
 
@@ -514,6 +676,52 @@ async fn record_circuit_failure(state: &ProxyState, entry_id: &str) {
     cb.record_failure(threshold);
 }
 
+fn spawn_record_circuit_success(
+    circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
+    db: Arc<Database>,
+    entry_id: String,
+) {
+    tokio::spawn(async move {
+        let recovery_secs = db
+            .get_settings()
+            .ok()
+            .map(|s| s.circuit_recovery_secs as u64)
+            .unwrap_or(60);
+
+        let mut breakers = circuit_breakers.write().await;
+        let cb = breakers
+            .entry(entry_id)
+            .or_insert_with(|| CircuitBreaker::new(recovery_secs));
+        cb.set_recovery_secs(recovery_secs);
+        cb.record_success();
+    });
+}
+
+fn spawn_record_circuit_failure(
+    circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
+    db: Arc<Database>,
+    entry_id: String,
+) {
+    tokio::spawn(async move {
+        let settings = db.get_settings().ok();
+        let threshold = settings
+            .as_ref()
+            .map(|s| s.circuit_failure_threshold as u32)
+            .unwrap_or(4);
+        let recovery_secs = settings
+            .as_ref()
+            .map(|s| s.circuit_recovery_secs as u64)
+            .unwrap_or(60);
+
+        let mut breakers = circuit_breakers.write().await;
+        let cb = breakers
+            .entry(entry_id)
+            .or_insert_with(|| CircuitBreaker::new(recovery_secs));
+        cb.set_recovery_secs(recovery_secs);
+        cb.record_failure(threshold);
+    });
+}
+
 fn log_usage(
     db: &Database,
     app_handle: &tauri::AppHandle,
@@ -528,15 +736,23 @@ fn log_usage(
     status_code: i32,
     success: bool,
     error_message: Option<&str>,
+    attempt_path: Option<&str>,
+    stream_end_reason: Option<StreamEndReason>,
 ) {
     let log_type = if success { 2 } else { 5 };
     let content = error_message.unwrap_or("");
     let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("auto");
     let use_time = ((latency_ms as f64) / 1000.0).ceil() as i64;
-    let other = format!(
-        "{{\"requested_model\":\"{}\",\"resolved_model\":\"{}\",\"first_token_ms\":{},\"status_code\":{},\"success\":{}}}",
-        requested_model, entry.model, first_token_ms, status_code, success
-    );
+    let other = serde_json::json!({
+        "requested_model": requested_model,
+        "resolved_model": entry.model,
+        "first_token_ms": first_token_ms,
+        "status_code": status_code,
+        "success": success,
+        "attempt_path": attempt_path.and_then(|path| serde_json::from_str::<Value>(path).ok()),
+        "stream_end_reason": stream_end_reason.map(StreamEndReason::as_str),
+    })
+    .to_string();
 
     let _ = db.insert_usage_log(
         log_type, content,
@@ -551,4 +767,36 @@ fn log_usage(
     );
 
     let _ = app_handle.emit("new-usage-log", ());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::protocol::get_adapter;
+
+    #[test]
+    fn transformed_sse_chunks_are_standard_sse_frames() {
+        let adapter = get_adapter("claude");
+        let chunk = Bytes::from_static(
+            b"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-3\"}}\n\
+data: [DONE]\n"
+        );
+        let mut buffer = String::new();
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+
+        let output = transform_sse_chunk(
+            &chunk,
+            &mut buffer,
+            &adapter,
+            &prompt_tokens,
+            &completion_tokens,
+        )
+        .expect("transformed output");
+        let output = String::from_utf8(output.to_vec()).expect("valid utf8");
+
+        assert!(output.contains("\n\n"));
+        assert!(output.ends_with("data: [DONE]\n\n"));
+        assert!(!output.contains("data: [DONE]\n\ndata: [DONE]"));
+    }
 }

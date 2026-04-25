@@ -8,16 +8,16 @@ use tokio::sync::RwLock;
 ///
 /// Rules:
 /// - `auto`: use enabled entries only (auto-select pool).
-/// - exact model match: try matched entries (all, including disabled) first,
+/// - exact model match: try matched enabled entries first,
 ///   then fall back to enabled entries as auto-fallback to prevent disconnection.
 /// - wrong model name: fall back to enabled entries (AUTO behavior).
 ///
-/// `enabled_entries`: entries with enabled=1 (AUTO pool).
-/// `all_entries`: all entries including disabled (exact match pool).
+/// This intentionally follows NEW-API's enabled-channel pool behavior: disabled
+/// entries must never be selected by the formal proxy route. Testing disabled
+/// entries is handled by the test-chat command/path only.
 pub async fn resolve(
     model: &str,
     enabled_entries: &[ApiEntry],
-    all_entries: &[ApiEntry],
     circuit_breakers: &RwLock<HashMap<String, CircuitBreaker>>,
 ) -> Vec<ApiEntry> {
     let breakers = circuit_breakers.read().await;
@@ -42,9 +42,10 @@ pub async fn resolve(
         return filter_available(enabled_entries);
     }
 
-    // Exact model match from ALL entries (including disabled)
-    let all_available = filter_available(all_entries);
-    let matched: Vec<ApiEntry> = all_available
+    // Exact model match from ENABLED entries only. This mirrors NEW-API's
+    // channel cache, which excludes disabled channels from formal routing.
+    let enabled_available = filter_available(enabled_entries);
+    let matched: Vec<ApiEntry> = enabled_available
         .iter()
         .filter(|e| e.model == model)
         .cloned()
@@ -52,12 +53,11 @@ pub async fn resolve(
 
     if matched.is_empty() {
         // Wrong model name → fallback to AUTO (enabled entries)
-        return filter_available(enabled_entries);
+        return enabled_available;
     }
 
     // Exact match found: try matched entries first,
     // then append enabled entries as auto-fallback to prevent disconnection.
-    let enabled_available = filter_available(enabled_entries);
     let mut result = matched;
     for entry in &enabled_available {
         if !result.iter().any(|e| e.id == entry.id) {
@@ -65,4 +65,84 @@ pub async fn resolve(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, model: &str, enabled: bool, sort_index: i32) -> ApiEntry {
+        ApiEntry {
+            id: id.to_string(),
+            channel_id: format!("channel-{id}"),
+            model: model.to_string(),
+            display_name: model.to_string(),
+            sort_index,
+            enabled,
+            circuit_state: "closed".to_string(),
+            created_at: 0,
+            updated_at: 0,
+            channel_name: Some(format!("channel-{id}")),
+            channel_api_type: Some("openai".to_string()),
+            owned_by: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_uses_enabled_entries_in_order() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![
+            entry("first", "gpt-4o", true, 0),
+            entry("second", "claude-3", true, 1),
+            entry("third", "gemini-pro", true, 2),
+        ];
+
+        let resolved = resolve("auto", &enabled, &breakers).await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn exact_model_matches_enabled_entries_only() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![
+            entry("match", "gpt-4o", true, 0),
+            entry("fallback", "claude-3", true, 1),
+        ];
+
+        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match", "fallback"]);
+    }
+
+    #[tokio::test]
+    async fn exact_model_without_enabled_match_falls_back_to_auto_pool() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![entry("fallback", "claude-3", true, 1)];
+
+        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "fallback");
+    }
+
+    #[tokio::test]
+    async fn circuit_open_entries_are_skipped() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![
+            entry("open", "gpt-4o", true, 0),
+            entry("fallback", "claude-3", true, 1),
+        ];
+        {
+            let mut guard = breakers.write().await;
+            let cb = CircuitBreaker::new(60);
+            cb.record_failure(1);
+            guard.insert("open".to_string(), cb);
+        }
+
+        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "fallback");
+    }
 }

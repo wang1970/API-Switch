@@ -9,9 +9,11 @@
 
 **API Switch** 是一款基于 Tauri v2 的桌面应用，用于统一管理和转发多个 AI API 渠道。用户可配置多个 API 渠道（OpenAI / Anthropic / Gemini / Azure / 自定义兼容），系统作为本地代理服务器运行，对外暴露统一的 OpenAI 兼容接口，内部实现智能路由、自动故障转移、熔断保护和用量统计。
 
+> **定位说明**：API Switch 面向个人本地使用场景，默认信任本机环境，不按公网多用户服务进行安全模型设计。API Key 明文存储、Access Key 可关闭、SQLite 单机存储、熔断状态内存态等均是为降低个人工具复杂度做出的设计取舍。
+
 ### 核心价值
 - **多渠道路由**：一个入口访问多个 AI 服务商，按模型自动匹配或手动指定
-- **高可用**：熔断器 + 自动故障转移，单点故障不影响使用
+- **提升可用性**：熔断器 + 自动故障转移，降低单渠道故障对使用的影响
 - **用量可视化**：实时 Dashboard + 请求日志 + Token 消耗统计
 - **轻量桌面**：Tauri v2 架构，内存占用低，跨平台
 
@@ -30,10 +32,10 @@
 | 数据库 | rusqlite 0.31 (bundled) | 嵌入式 SQLite，WAL 模式 |
 | 前端框架 | React 19 + TypeScript 5.8 | UI 渲染层 |
 | UI 组件 | Radix UI + Tailwind CSS v4 | 无障碍组件库 |
-| 状态管理 | TanStack React Query v5 | ChannelPage 已接入（useQuery/useMutation），其余页面待迁移 |
+| 状态管理 | TanStack React Query v5 | 主要页面已接入（Channel / API 管理 / Token / Log / Dashboard / Settings） |
 | 图表 | Recharts v3 | Dashboard 可视化 |
 | 国际化 | i18next + react-i18next | 中/英双语 |
-| 拖拽 | @dnd-kit | API Pool 排序 |
+| 拖拽 | @dnd-kit | API 管理排序 |
 | 表单 | react-hook-form + zod v4 | 已安装，当前页面使用 useState 管理表单 |
 
 ### 2.2 整体架构
@@ -102,10 +104,10 @@
 | `app_settings` | 全局配置 | KV 存储 (listen_port, circuit_failure_threshold, circuit_recovery_secs, locale, theme 等) |
 
 #### `database/dao/` — 数据访问层
-- **channel_dao.rs** (210行): CRUD + 模型管理（available/selected JSON 序列化）
+- **channel_dao.rs**: CRUD + 模型管理（available/selected JSON 序列化）
 - **api_entry_dao.rs**: 条目 CRUD + 启停 + 排序 + 路由查询（JOIN channel 获取完整信息）
 - **access_key_dao.rs**: 密钥 CRUD + 启停 + key 查找
-- **usage_dao.rs** (580行): 日志插入 + 分页查询 + Dashboard 聚合统计 + 图表数据
+- **usage_dao.rs**: 日志插入 + 分页查询 + Dashboard 聚合统计 + 图表数据
 - **config_dao.rs**: 设置读写 (KV JSON)
 
 #### `proxy/server.rs` — 代理服务器
@@ -114,7 +116,7 @@
 - 路由: `/health`, `/v1/chat/completions`, `/v1/models`
 - CORS 中间件 (`tower-http`)，允许 WebView 跨域访问
 
-#### `proxy/handlers.rs` (138行) — 请求处理
+#### `proxy/handlers.rs` — 请求处理
 - `health_check`: 健康检查
 - `handle_chat_completions`: 核心代理逻辑
   - 使用 `HeaderMap` + `Bytes` 独立提取器（避免 axum 0.7 `Request<Body>` 非 Send 问题）
@@ -133,7 +135,7 @@
 - 从 `Authorization: Bearer <key>` 提取密钥
 - `access_key_required` 开启时强制验证，关闭时仅用于身份追踪
 
-#### `proxy/forwarder.rs` (499行) — 请求转发
+#### `proxy/forwarder.rs` — 请求转发
 - 按条目列表逐个尝试（failover）
 - 通过 `protocol::get_adapter()` 获取适配器，统一调用 trait 方法
 - 支持流式 (SSE) 和非流式响应
@@ -176,12 +178,12 @@
 
 ### 3.2 前端模块 (`src/`)
 
-#### `types.ts` — 类型定义 (234行)
+#### `types.ts` — 类型定义
 - `ApiType = "openai" | "claude" | "gemini" | "azure" | "custom"`
 - 每种类型配有默认 URL、URL 提示、API Key 提示（中英双语）
 - 完整的 Channel / ApiEntry / AccessKey / UsageLog / DashboardStats 等接口定义
 
-#### `lib/api.ts` — Tauri IPC 封装 (154行)
+#### `lib/api.ts` — Tauri IPC 封装
 - 所有 `invoke()` 调用集中管理
 - 完整覆盖后端所有 command
 
@@ -192,12 +194,12 @@
 
 | 页面 | 文件 | 功能 |
 |------|------|------|
-| API Pool | `ApiPoolPage.tsx` (358行) | 条目列表 + 拖拽排序 + 新建弹窗 + 测试对话弹窗（耗时+token显示） |
-| Channel | `ChannelPage.tsx` (752行) | 统一添加/编辑弹窗（基础配置+内嵌模型选择+一键保存同步） + TanStack React Query + 状态切换联动禁用关联条目 |
-| Token | `TokenPage.tsx` | 密钥列表 + 创建/删除 + 启停 + Key 复制 |
-| Logs | `LogPage.tsx` (267行) | 请求日志分页 + 多维筛选 + 详情展开 |
-| Dashboard | `DashboardPage.tsx` (321行) | 统计概览 + 4图表（消耗趋势/调用趋势/模型分布/用户趋势） |
-| Settings | `SettingsPage.tsx` (148行) | 代理端口/开关（联动启停） + 熔断参数 + 语言/主题切换 |
+| API 管理 | `ApiPoolPage.tsx` | 条目列表 + 拖拽排序 + 新建弹窗 + 测试对话弹窗（耗时+token显示） |
+| Channel | `ChannelPage.tsx` | 统一添加/编辑弹窗（基础配置+内嵌模型选择+一键保存同步） + TanStack React Query + 状态切换联动禁用关联条目 |
+| Token | `TokenPage.tsx` | 密钥表格 + 创建/删除 + 启停 + Key 复制 |
+| Logs | `LogPage.tsx` | 请求日志分页 + 多维筛选 + 详情展开 |
+| Dashboard | `DashboardPage.tsx` | 统计概览 + 4 图表（消耗趋势/调用趋势/模型分布/用户趋势） |
+| Settings | `SettingsPage.tsx` | 代理端口/开关（联动启停） + 熔断参数 + 语言/主题切换 |
 
 #### `App.tsx` — 主布局
 - 左侧 6 页导航栏 (Sidebar) + 右侧内容区
@@ -234,17 +236,12 @@ Client → POST /v1/chat/completions
 ### 4.2 前端数据流
 
 ```
-ChannelPage: React Component → TanStack Query (useQuery/useMutation)
+React Component → TanStack Query (useQuery/useMutation)
   → lib/api.ts → Tauri invoke() → Rust Command → Database (SQLite)
   → 返回 → Query Cache → 自动失效 & 重新获取 → Component Re-render
-
-其余页面: React Component → useState + 直接 invoke()
-  → lib/api.ts → Tauri invoke() → Rust Command → Database (SQLite)
-  → 返回 → setState → Component Re-render
 ```
 
-> TanStack React Query 已在 ChannelPage 接入（useQuery/useMutation/optimistic update），
-> 其余页面（ApiPool/Token/Log/Dashboard/Settings）待迁移。
+> TanStack React Query 已覆盖主要页面；表单内部临时状态仍使用 React `useState` 管理。
 
 ---
 
@@ -270,15 +267,15 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 - [x] 健康检查端点
 - [x] **应用图标替换**: `icon.jpg` 通过 sharp + png-to-ico 生成所有尺寸图标（PNG/ICO/ICNS）
 - [x] **CORS 中间件**: `tower-http` CorsLayer 允许所有 origin，支持 WebView 跨域访问代理
-- [x] **API 池测试对话**: `TestChatDialog` 组件，通过 HTTP fetch 走代理端口（测试完整链路），流式 SSE 拆分连接时间(TTFB)+思考时间，显示 token 统计
+- [x] **API 管理测试对话**: `TestChatDialog` 组件，通过 HTTP fetch 走代理端口（测试完整链路），使用非流式请求以兼容更多模型，显示耗时与 token 统计
 
 ### 5.2 前端 UI
 - [x] 中英双语国际化 (i18next)
 - [x] 亮色/暗色/跟随系统主题
-- [x] Dashboard 页面（统计卡片 + 6 种 Recharts 图表）
+- [x] Dashboard 页面（统计卡片 + 4 种 Recharts 图表）
 - [x] Channel 管理页面（平铺列表 + 操作列导入/编辑/删除 + 创建/编辑弹窗 + 导入模型弹窗含拉取 + 连通性测试弹窗 + TanStack React Query）
-- [x] API Pool 页面（拖拽排序 @dnd-kit + 新建弹窗 + 测试对话弹窗 + 渠道/模型双行显示）
-- [x] **TestChatDialog 组件**: 测试对话弹窗，HTTP fetch 走代理端口（流式 SSE），连接时间 🔗 + 思考时间 💭 拆分显示，IN/OUT token 统计
+- [x] API 管理页面（拖拽排序 @dnd-kit + 新建弹窗 + 测试对话弹窗 + 渠道/模型双行显示）
+- [x] **TestChatDialog 组件**: 测试对话弹窗，HTTP fetch 走代理端口，使用非流式请求提升兼容性，显示耗时与 IN/OUT token 统计
 - [x] **渠道添加/编辑统一弹窗**: 基础配置 + 内嵌模型拉取/选择，保存时同步到 API 池，新增模型默认 disabled
 - [x] **路由 fallback 不断链**: 精确匹配条目（含 disabled）+ enabled 条目作为 auto-fallback，错误模型名直接 fallback 到 AUTO
 - [x] Token 密钥管理页面（独立页面，创建/删除/启停 + Key 复制）
@@ -294,33 +291,39 @@ ChannelPage: React Component → TanStack Query (useQuery/useMutation)
 ### ~~P0 — 关键缺失~~
 - ~~**cargo-tauri CLI 安装**: `@tauri-apps/cli` 已在 devDependencies，`pnpm tauri dev` 可直接使用~~
 
-### P1 — 重点需求
-- [ ] **CLI 自动配置**: 启动代理后自动配置系统环境变量（如 `OPENAI_API_BASE`、`OPENAI_API_KEY`），让 OpenAI CLI、curl 等命令行工具直接使用 API Switch 转发，无需手动配置每个工具
-- [ ] **自动更新**: Tauri updater 集成
-- [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史
+### P1 — 稳定性与可观测性
+- [x] **正式代理路由不应命中 disabled 条目**: 已修复。正式代理路由对齐 NEW-API enabled-channel pool 行为，显式模型只从 enabled entries 匹配；disabled entry 仅保留给测试对话/测试命令直接调用。
+- [x] **Claude SSE 转换补标准事件分隔**: 已修复。`transform_sse_chunk()` 对 Claude 转换路径输出标准 SSE frame：`data: ...\n\n`，`[DONE]` 同样输出 `data: [DONE]\n\n`。
+- [x] **流式超时保护**: 已实现简化版 NEW-API streaming timeout。流式 idle 超过 300s 会记录 `stream_end_reason=timeout` 并结束，HTTP 连接阶段另有 30s connect timeout。
+- [ ] **客户端断开检测**: 客户端断开后仍等待上游完成，可能浪费上游额度。参考 NEW-API `c.Request.Context().Done()` 主动检测
+- [x] **SSE Ping 保活**: 已实现简化版 NEW-API ping keep-alive。流式响应每 10s 发送 SSE comment `: PING\n\n`，降低长思考模型被中间代理断开的概率。
+- [x] **StreamLogGuard drop 日志状态修正**: 已部分修复。流式 body 提前 drop 时不再固定记 success=true，而是记录 success=false、`stream_end_reason=dropped` 和错误信息；后续继续细分 client_gone/timeout。
+- [x] **重试路径记录**: 已部分实现。usage log `other.attempt_path` 记录每次尝试的 entry/channel/model/status/success/error，方便个人排障。
+- [x] **流结束原因追踪**: 已实现基础 `StreamEndReason`（done/upstream_error/timeout/dropped）并写入 usage log `other.stream_end_reason`；client_gone/scanner_error 作为后续细分。
+- [ ] **错误提示优化**: 前端统一 Toast 错误提示，替代零散 `alert()` 与局部错误文案
 
-### P1 — 功能增强
-- [ ] **Gemini 原生格式验证**: 当前 Gemini 适配器使用 Google OpenAI 兼容端点 (`/v1beta/openai/`)，原生格式转换函数已实现但未接入 trait（可作为备选方案）
-- [ ] **Azure deployment 验证**: Azure 适配器已实现完整 URL 路径 + api-key 认证 + 模型列表解析，待有 Azure 资源后端到端验证
-
-### P2 — 体验优化
-- [ ] **模型切换通知**: 故障转移导致模型切换时，通过 SSE 自定义事件 `event: model_switch` 或响应扩展字段通知下游客户端实际使用的模型及切换原因（如 provider_unavailable），让用户感知到模型变化
+### P2 — 体验增强
+- [ ] **504/524 重试策略讨论**: 当前硬编码 504/524 永不重试。个人工具场景下可能更希望继续 failover 到下一个渠道，建议讨论是否改为配置项或并入 retry_codes。
+- [x] **reqwest Client 复用**: 已完成。`ProxyState` 持有全局 `reqwest::Client`，转发时复用连接池，并保留 30s connect timeout。
+- [ ] **非流式上游 header 保留**: 当前非流式响应重建为 `axum::Json`，不透传上游 request id / rate limit 等 headers。个人使用可接受，后续如需排障可补充关键 header。
+- [ ] **CLI 配置片段生成**: 在 UI 中提供 bash / PowerShell 环境变量片段（如 `OPENAI_BASE_URL`、`OPENAI_API_KEY`），优先提供复制命令，不直接写系统环境变量
+- [ ] **模型切换通知**: 故障转移导致模型切换时，通过 SSE 自定义事件 `event: model_switch` 或响应扩展字段通知下游客户端实际使用的模型及切换原因（如 provider_unavailable）
 - [ ] **验证 auto 模式模型名透传**: 用户用 `model: "auto"` 对话时，客户端 UI 应显示实际使用的模型名（如 `glm-5-turbo`）。因为 `transform_request` 会把 body 里的 model 替换为实际模型名，上游响应会带实际模型名透传回客户端。需实际测试验证链路是否完整。
-- [ ] **SSE Ping 保活**: 长思考模型（o1/o3）可能在 30-60s 后因反向代理超时断开。参考 NEW-API `startPingKeepAlive` goroutine，可配置间隔发送 `: PING\n\n`
-- [ ] **流超时保护**: 当前无流式超时，上游挂死会无限等待。参考 NEW-API `streamingTimeout` ticker（默认 300s）
-- [ ] **客户端断开检测**: 客户端断开后仍等待上游完成。参考 NEW-API `c.Request.Context().Done()` 主动检测
 - [x] **实时日志推送**: 后端 `log_usage()` 写 DB 后通过 `emit("new-usage-log")` 推送事件，前端 `LogPage` 监听并自动刷新
 - [ ] **请求/响应 Mock**: 前端开发时缺少 Mock 数据，开发体验不佳
-- [ ] **错误提示优化**: 前端统一的 Toast 错误提示
 - [ ] **响应式布局**: 当前 min 800×600，小屏适配
-- [ ] **TanStack React Query 全量接入**: ChannelPage 已接入，其余 5 个页面待迁移
+- [x] **验证矩阵补充**: 增加各 API 类型的拉取模型、非流式、流式、工具调用、图片输入、错误码透传端到端验证状态
 
-### P3 — 未来愿景
-- [ ] **重试路径记录**: 日志中记录 `重试: channel1->channel2->channel3`，参考 NEW-API `use_channel` 切片
-- [ ] **流结束原因追踪**: `StreamEndReason` 枚举（done/timeout/client_gone/scanner_error），参考 NEW-API `StreamStatus`
-- [ ] **多用户隔离**: 按 Access Key 做用量配额限制
+### P3 — 可选能力 / 未来愿景
+- [ ] **自动更新**: 当前仅完成 GitHub Releases 更新检查，Tauri updater 自动下载/安装可后续集成
+- [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史；个人工具场景可接受，持久化为可选增强
+- [ ] **Gemini 原生格式验证**: 当前 Gemini 适配器使用 Google OpenAI 兼容端点 (`/v1beta/openai/`)，原生格式转换函数已实现但未接入 trait（可作为备选方案）
+- [ ] **Azure deployment 验证**: Azure 适配器已实现完整 URL 路径 + api-key 认证 + 模型列表解析，待有 Azure 资源后端到端验证
+- [ ] **监听地址可配置**: 个人局域网场景可选 `127.0.0.1` / `0.0.0.0`，默认继续保持开箱即用
+- [ ] **API Key 加密存储**: 当前明文存储是个人本地工具的设计取舍；如后续需要可接入系统 Keychain / DPAPI / Keyring
+- [ ] **多用户隔离**: 按 Access Key 做用量配额限制（超出个人工具核心定位）
 - [ ] **插件系统**: 支持自定义中间件（如日志脱敏、请求改写）
-- [ ] **集群部署**: 支持 SQLite → PostgreSQL 迁移，多实例负载均衡
+- [ ] **集群部署**: 支持 SQLite → PostgreSQL 迁移，多实例负载均衡（超出个人工具核心定位）
 
 ---
 
@@ -346,7 +349,21 @@ pnpm build            # 生产构建
 
 ---
 
-## 8. 已知问题 & 风险
+## 8. 设计取舍 & 已知限制
+
+API Switch 定位为个人本地工具，优先保证轻量、便携、低配置成本。以下项目是当前阶段有意识接受的设计取舍，不按公网多用户服务标准处理。
+
+| 项 | 当前取舍 | 原因 / 后续方向 |
+|---|---|---|
+| API Key 明文存储 | 接受 | 个人本地工具降低复杂度，README 已声明；如后续需要可接入系统 Keychain / DPAPI / Keyring |
+| Access Key 可关闭 | 接受 | 本机个人使用优先降低门槛；需要时可在系统设置中开启强制验证 |
+| SQLite + Mutex | 接受 | 单机低并发场景足够；如后续请求量明显上升，可考虑 `spawn_blocking`、异步写入队列或迁移到 sqlx/tokio-rusqlite |
+| 熔断状态内存态 | 接受 | 重启后清空状态符合轻量工具预期；持久化作为 P3 可选增强 |
+| CORS 宽松 | 接受 | 主要服务 WebView 与本机客户端；非公网服务场景下可接受 |
+| 监听地址 | 待整理 | 当前以开箱即用为主；后续可增加 `127.0.0.1` / `0.0.0.0` 配置 |
+| Custom base_url 约定 | 接受 | Custom 适配器假设用户填写完整版本路径（如 `https://api.example.com/v1`），不会自动追加 `/v1`。后续可在 UI 提示中强化说明 |
+
+### 历史已解决问题
 
 | # | 问题 | 严重度 | 说明 |
 |---|------|--------|------|
@@ -360,7 +377,7 @@ pnpm build            # 生产构建
 | 8 | ~~三机制未生效~~ | ~~🔴高~~ | ✅ 已修复：DB migration 补默认值 + 副作用与重试分离 |
 | 9 | ~~Release 构建未完成~~ | ~~🟡中~~ | ✅ v0.1.0 已通过 GitHub Actions CI/CD 成功发布 4 平台 |
 
-> **设计说明**：API Key 明文存储是设计决策，已在 README 免责声明中明确；熔断状态不持久已在 P1 待开发计划中。
+> **说明**：当前最高优先级不再是公网安全模型，而是个人本地使用下的代理稳定性、重试可观测性和 UI 体验。
 
 ---
 
@@ -385,7 +402,7 @@ api-switch/
 │       │       └── config_dao.rs           # KV 配置
 │       ├── commands/
 │       │   ├── mod.rs                      # Command 注册
-│       │   ├── channel.rs                  # 渠道命令 (含 test_chat, 263行)
+│       │   ├── channel.rs                  # 渠道命令（含 test_chat）
 │       │   ├── pool.rs                     # 池命令
 │       │   ├── token.rs                    # 密钥命令
 │       │   ├── usage.rs                    # 统计命令
@@ -395,45 +412,45 @@ api-switch/
 │       └── proxy/
 │           ├── mod.rs                      # 模块导出
 │           ├── server.rs                   # Axum 服务器
-│           ├── handlers.rs                 # 请求处理 (138行)
+│           ├── handlers.rs                 # 请求处理
 │           ├── router.rs                   # 智能路由 (enabled+all双列表, fallback不断链)
 │           ├── auth.rs                     # 认证
-│           ├── forwarder.rs                # 转发 + 重试 (499行)
+│           ├── forwarder.rs                # 转发 + 重试
 │           ├── circuit_breaker.rs          # 熔断器
 │           └── protocol/                   # 协议适配 (trait 模块化架构)
-│               ├── mod.rs                  # ProtocolAdapter trait + get_adapter() + 88个测试 (1200行)
-│               ├── common.rs               # join_url 共享工具 (16行)
-│               ├── openai.rs               # OpenAI 适配器 (88行)
-│               ├── claude.rs               # Anthropic 适配器 (732行)
-│               ├── gemini.rs               # Gemini 适配器 + 原生格式转换函数 (545行)
-│               ├── azure.rs                # Azure OpenAI 适配器 (128行)
-│               └── custom.rs               # 自定义适配器 (91行)
+│               ├── mod.rs                  # ProtocolAdapter trait + get_adapter() + 单元测试
+│               ├── common.rs               # join_url 共享工具
+│               ├── openai.rs               # OpenAI 适配器
+│               ├── claude.rs               # Anthropic 适配器
+│               ├── gemini.rs               # Gemini 适配器 + 原生格式转换函数
+│               ├── azure.rs                # Azure OpenAI 适配器
+│               └── custom.rs               # 自定义适配器
 ├── src/
 │   ├── main.tsx                            # React 入口
 │   ├── App.tsx                             # 主布局 + 路由
-│   ├── types.ts                            # 完整类型定义 (234行)
+│   ├── types.ts                            # 完整类型定义
 │   ├── lib/
-│   │   ├── api.ts                          # Tauri IPC 封装 (154行)
+│   │   ├── api.ts                          # Tauri IPC 封装
 │   │   └── utils.ts                        # cn() 工具
 │   ├── components/
 │   │   ├── ui/                             # Radix UI 组件
 │   │   └── proxy/
 │   │       ├── ProxyToggle.tsx             # 代理启停按钮
-│   │       └── TestChatDialog.tsx          # 测试对话弹窗 (流式SSE, 连接+思考拆分)
+│   │       └── TestChatDialog.tsx          # 测试对话弹窗（非流式请求，耗时+token显示）
 │   └── pages/
-│       ├── DashboardPage.tsx               # Dashboard (451行)
+│       ├── DashboardPage.tsx               # Dashboard
 │       ├── ChannelPage.tsx                 # 渠道管理 (统一弹窗+模型选择)
-│       ├── ApiPoolPage.tsx                 # API 池 (513行)
+│       ├── ApiPoolPage.tsx                 # API 管理
 │       ├── TokenPage.tsx                   # 密钥管理
-│       ├── LogPage.tsx                     # 日志 (267行)
-│       └── SettingsPage.tsx                # 设置 (148行)
+│       ├── LogPage.tsx                     # 日志
+│       └── SettingsPage.tsx                # 设置
 ├── package.json
 └── PLAN.md                                 # ← 本文件
 ```
 
-## 10. 已知问题 & 待修复 BUG
+## 10. 历史问题修复记录
 
-### 🔴 P0 — 影响正常使用
+### 🔴 已解决 P0 — 曾影响正常使用
 
 | # | 问题 | 根因 | 现象 | 建议 |
 |---|------|------|------|------|
@@ -442,7 +459,7 @@ api-switch/
 | 3 | ~~**三机制（禁用/重试/关键词）未生效**~~ | ✅ 已修复：`process_entry_error` 副作用 + `should_retry` 分离；DB migration 补默认值；禁用≠停止重试 |
 | 4 | ~~**first_token_ms 永远为 0**~~ | ✅ 已修复：`Instant::now()` 移到 `request.send()` 之前，TTFB 真实记录 |
 
-### 🟡 P1 — 功能增强
+### 🟡 待验证 / 可选增强
 
 | # | 功能 | 说明 |
 |---|------|------|
@@ -458,7 +475,63 @@ api-switch/
 
 ---
 
-## 11. 变更日志
+## 11. 验证矩阵
+
+> 说明：该矩阵区分“已实现 / 已验证 / 待验证”。协议适配器单元测试不等同于所有上游端到端验证。
+
+| API 类型 | 拉取模型 | 非流式聊天 | 流式聊天 | 工具调用 | 图片输入 | 错误码透传 | 当前状态 |
+|---|---|---|---|---|---|---|---|
+| OpenAI | ✅ 已实现 | ✅ 已验证 | ✅ 已验证 | 待验证 | 待验证 | ✅ 已验证 | 主要链路可用 |
+| Custom | ✅ 已实现 | ✅ 已验证 | ✅ 已验证 | 依赖上游 | 依赖上游 | ✅ 已实现 | OpenAI 兼容上游优先支持 |
+| Claude | ✅ 已实现 | ✅ 已验证 | ✅ 已验证 | 待验证 | 待验证 | ✅ 已验证 | 格式转换复杂，需继续补端到端用例 |
+| Gemini | ✅ 已实现 | 待验证 | 待验证 | 待验证 | 待验证 | 待验证 | 当前使用 Google OpenAI 兼容端点，原生格式作为备选 |
+| Azure | ✅ 已实现 | 待验证 | 待验证 | 待验证 | 待验证 | 待验证 | 缺 Azure 资源，待端到端验证 |
+
+---
+
+## 12. 转发核心待讨论问题
+
+> 2026-04-25 检查 `handlers.rs` / `router.rs` / `forwarder.rs` / `auth.rs` / `server.rs` / 协议适配器后记录。以下问题先固化到计划，后续逐个讨论并决定是否修复。
+
+| 优先级 | 问题 | 当前表现 | 初步建议 |
+|---|---|---|---|
+| P1 ✅ | 显式模型路由可能命中 disabled 条目 | 已修复：正式代理只从 enabled entries 匹配显式模型，disabled 条目不再进入正式代理路由 | 已加 router 单元测试覆盖 auto、显式匹配、fallback、熔断跳过 |
+| P1 ✅ | Claude SSE 转换缺少标准空行分隔 | 已修复：Claude 转换路径统一输出 `data: ...\n\n`，包括 `[DONE]` | 已加 SSE frame 单元测试 |
+| P1 ✅ | 流式请求无超时保护 | 已实现 30s connect timeout + 300s streaming idle timeout；idle timeout 写入 `stream_end_reason=timeout` | 后续可做 UI 可配置 |
+| P1 ◐ | 客户端断开后的日志状态不准确 | 已修复 drop 兜底固定 success=true 的问题，提前 drop 记录 `stream_end_reason=dropped` | 后续继续细分 client_gone / timeout / scanner_error |
+| P1 ✅ | SSE Ping 保活 | 已实现 10s ping keep-alive，流式响应周期性发送 `: PING\n\n`，对齐 NEW-API `PingData` 思路 | 后续可做 UI 可配置 |
+| P2 ◐ | 504/524 永不重试策略需讨论 | 已修复副作用顺序：504/524 虽然不重试，但会先记录 circuit failure，避免坏渠道持续优先命中 | 是否允许 504/524 failover 仍作为个人工具策略待讨论 |
+| P2 ✅ | 每次请求创建 reqwest Client | 已修复：`ProxyState` 持有全局 `reqwest::Client`，转发时复用连接池，并保留 30s connect timeout | 后续可继续调优连接池参数 |
+| P2 | 非流式响应不透传上游 headers | `axum::Json` 重建响应会丢失 request id / rate limit 等 headers | 保留关键 headers 或在日志中记录 |
+| P3 | 流式首字时间不是严格首 token | 当前记录上游第一个 chunk；Claude 可能先发 metadata / message_start | 后续可在第一个有效 content delta 时记录 |
+
+---
+
+## 13. 变更日志
+
+### 2026-04-25 — 转发核心对齐 NEW-API（v0.2.0-dev）
+
+**改动文件**: 5 个文件
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **enabled-only 正式路由** | 正式代理路由对齐 NEW-API enabled-channel pool 行为，显式模型只从 enabled entries 匹配；disabled 条目不再进入正式代理路由，仅保留给测试对话/测试命令直接调用 |
+| 2 | **Claude SSE 标准 frame** | Claude 转换路径输出标准 SSE 事件分隔：`data: ...\n\n`，`[DONE]` 同样输出 `data: [DONE]\n\n` |
+| 3 | **流式日志结束原因** | 新增简化版 `StreamEndReason`（done/upstream_error/timeout/dropped），StreamLogGuard drop 兜底不再固定记成功，提前 drop 记录失败和原因 |
+| 4 | **重试路径记录** | usage log 的 `other.attempt_path` 记录每次尝试的 entry/channel/model/status/success/error，融合 NEW-API `use_channel` 思路 |
+| 5 | **流式响应头补齐** | SSE 响应新增 `X-Accel-Buffering: no`，减少代理缓冲影响 |
+| 6 | **HTTP 连接超时 + 流式 idle timeout** | reqwest client 增加 30s connect timeout；流式上游 300s idle 后记录 `stream_end_reason=timeout` 并结束 |
+| 7 | **HTTP Client 复用** | `ProxyState` 持有全局 `reqwest::Client`，转发时复用连接池，避免每次请求重新构建 client |
+| 8 | **SSE Ping 保活** | 流式响应每 10s 发送 SSE comment `: PING\n\n`，对齐 NEW-API `PingData` 思路 |
+| 9 | **连接失败重试对齐** | `status=0`（请求/连接失败）现在会继续 failover，对齐 NEW-API 对无效 HTTP 状态码继续重试的行为 |
+| 10 | **熔断副作用顺序修正** | 504/524 仍保持 NEW-API 永不重试策略，但现在会先记录 circuit failure，再停止 retry，避免坏渠道反复被命中 |
+| 11 | **流式失败熔断** | 流式 body 阶段发生 upstream error / idle timeout 时，会异步记录 circuit failure；正常 done 仍记录成功 |
+| 12 | **流式成功延后到 body 完成** | 流式 headers 200 后不再立即 `record_circuit_success`，改为 body 正常结束（done）时记录成功，避免后续 timeout/upstream_error 前误清空失败计数 |
+| 13 | **流式 attempt_path 语义修正** | 流式日志在最终结束时动态构造当前 attempt：done 记 success=true，timeout/upstream_error/dropped 记 success=false，避免顶层日志和 attempt_path 冲突 |
+| 14 | **AUTO 排序稳定性修正** | 批量同步新模型时为每个新 entry 分配递增 `sort_index`，路由查询按 `sort_index, created_at` 稳定排序，避免 AUTO 优先级不确定 |
+| 15 | **回归测试** | 新增 router enabled-only/AUTO 顺序行为测试和 Claude SSE frame 测试；`cargo test` 97 passed，`cargo check` 0 errors，`pnpm typecheck` 0 errors |
+
+---
 
 ### 2026-04-25 — UI 体验优化（v0.2.0-dev）
 
@@ -498,7 +571,7 @@ api-switch/
 |---|--------|------|
 | 1 | **主题切换** | `App.tsx` 监听 `settings.theme` 变化，在 `<html>` 上加/移除 `dark` class，启动时从 DB 应用；默认浅色主题 |
 | 2 | **隐藏滚动条** | `index.css` 全局 `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`，保留滚动功能 |
-| 3 | **拖拽滚动** | `useDragScroll` hook，空白区域按住拖动滚动容器，按钮/开关/链接不受影响；侧边栏和主内容区都支持 |
+| 3 | ~~**拖拽滚动**~~ | 曾通过 `useDragScroll` 支持空白区域按住拖动滚动；后续因与 dnd-kit 排序体验冲突已移除，详见 UI 体验优化日志 |
 | 4 | **Custom API 类型优先** | `API_TYPE_OPTIONS` 数组中 Custom 排第一位，使用量最大 |
 | 5 | **Dashboard 卡片文案** | 去掉"今日"，改为"请求数/Tokens"等，因为是 24 小时统计 |
 | 6 | **更新检查** | 启动后查 GitHub Releases 最新版，有新版顶部显示提示条（不自动消失）。关闭引导后检查一次，无引导则直接检查 |
@@ -574,7 +647,7 @@ api-switch/
 - `parse_status_codes()`/`parse_keywords()` 保留在 `circuit_breaker.rs` 供后续使用
 - DB 字段 `circuit_disable_codes`/`circuit_retry_codes`/`disable_keywords` 保留不删
 
-**当前代理逻辑**: 任何错误 → 记录熔断 → 继续滚动 → 全部失败返回最后错误
+**当时代理逻辑**: 任何错误 → 记录熔断 → 继续滚动 → 全部失败返回最后错误。后续已在 2026-04-25 重新实现配置驱动的错误路由。
 
 ---
 
@@ -633,12 +706,12 @@ api-switch/
 
 | # | 改动项 | 说明 |
 |---|--------|------|
-| 1 | **路由 fallback 不断链** | `router.rs` 改为双列表（enabled + all），精确匹配查所有条目（含 disabled），后追加 enabled 作为 auto-fallback，错误模型名直接 fallback 到 AUTO |
-| 2 | **handlers.rs 传双列表** | `handle_chat_completions` 同时查 `get_enabled_entries_for_routing()` + `get_entries_for_routing_all()` 传给 router |
+| 1 | **路由 fallback 不断链** | 当时 `router.rs` 改为双列表（enabled + all），精确匹配查所有条目（含 disabled），后追加 enabled 作为 auto-fallback，错误模型名直接 fallback 到 AUTO；后续已在 v0.2.0-dev 对齐 NEW-API，正式代理不再命中 disabled 条目 |
+| 2 | **handlers.rs 传双列表** | 当时 `handle_chat_completions` 同时查 `get_enabled_entries_for_routing()` + `get_entries_for_routing_all()` 传给 router；后续正式代理已改回 enabled-only，`get_entries_for_routing_all()` 仅保留给测试链路 |
 | 3 | **get_entries_for_routing_all** | `api_entry_dao.rs` 新增方法，查所有条目（含 disabled），供路由精确匹配和测试对话使用 |
 | 4 | **新条目默认 disabled** | `sync_entries_for_channel` 新增条目时 `enabled` 从 `1` 改为 `0` |
 | 5 | **test_chat 直接适配器调用** | 不走路由/forwarder，直接通过 `get_adapter()` 调上游，支持 disabled 条目测试 |
-| 6 | **TestChatDialog 流式 SSE** | 改回 HTTP fetch 走代理端口（测试完整链路），`stream: true`，拆分 🔗连接时间 (TTFB) + 💭思考时间 |
+| 6 | **TestChatDialog 流式 SSE** | 当时改回 HTTP fetch 走代理端口（测试完整链路），`stream: true`，拆分连接时间 (TTFB) + 思考时间；后续为提升兼容性已改为非流式测试请求 |
 | 7 | **渠道添加/编辑统一弹窗** | `ChannelPage.tsx` 统一为同一个界面流程：基础配置 + 内嵌模型拉取/选择，保存时同步到 API 池 |
 | 8 | **API Key 明文切换** | 弹窗内添加密码/明文切换按钮 |
 

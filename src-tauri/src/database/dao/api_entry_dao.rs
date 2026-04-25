@@ -243,15 +243,17 @@ impl Database {
                 |row| row.get(0),
             )
             .unwrap_or(-1);
+        let mut next_sort = max_sort + 1;
 
         for model in selected_models {
             if !current_models.contains(model) {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
                     "INSERT INTO api_entries (id, channel_id, model, display_name, sort_index, enabled, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?3, ?4, 0, ?5, ?5)",
-                    rusqlite::params![id, channel_id, model, max_sort + 1, now],
+                      VALUES (?1, ?2, ?3, ?3, ?4, 0, ?5, ?5)",
+                    rusqlite::params![id, channel_id, model, next_sort, now],
                 )?;
+                next_sort += 1;
             }
         }
 
@@ -277,7 +279,7 @@ impl Database {
              FROM api_entries e
              LEFT JOIN channels c ON e.channel_id = c.id
              WHERE e.enabled = 1 AND c.enabled = 1
-             ORDER BY e.sort_index",
+              ORDER BY e.sort_index, e.created_at",
         )?;
 
         let entries = stmt
@@ -323,7 +325,7 @@ impl Database {
                     e.created_at, e.updated_at, c.name, c.api_type
              FROM api_entries e
              LEFT JOIN channels c ON e.channel_id = c.id
-             ORDER BY e.sort_index",
+              ORDER BY e.sort_index, e.created_at",
         )?;
 
         let entries = stmt

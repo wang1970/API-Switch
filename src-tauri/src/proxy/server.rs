@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tauri::Emitter;
+use std::time::Duration;
 use tokio::sync::{oneshot, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -24,6 +24,7 @@ pub struct ProxyState {
     pub db: Arc<Database>,
     pub circuit_breakers: Arc<RwLock<HashMap<String, CircuitBreaker>>>,
     pub app_handle: tauri::AppHandle,
+    pub http_client: reqwest::Client,
 }
 
 /// HTTP proxy server
@@ -39,6 +40,10 @@ impl ProxyServer {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             app_handle,
+            http_client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build proxy HTTP client"),
         };
 
         Self {
