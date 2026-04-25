@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -61,6 +60,11 @@ export function TokenPage() {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
   }
 
+  const formatDate = (ts: number) => {
+    const d = new Date(ts * 1000);
+    return d.toLocaleString();
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -71,50 +75,69 @@ export function TokenPage() {
         </Button>
       </div>
 
-      <div className="grid gap-3">
-        {keys?.map((key) => (
-          <Card key={key.id}>
-            <CardContent className="flex items-center gap-4 p-4">
-              <div className="flex-1 min-w-0">
-                <p className="font-medium">{key.name}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
-                    {key.key.slice(0, 8)}...{key.key.slice(-4)}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => copyKey(key.key, key.id)}
-                  >
-                    {copiedId === key.id ? (
-                      <Check className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-              <Switch
-                checked={key.enabled}
-                onCheckedChange={(checked) =>
-                  toggleMutation.mutate({ id: key.id, enabled: checked })
-                }
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => deleteMutation.mutate(key.id)}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {!keys?.length && (
+      {keys?.length ? (
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                <th className="px-4 py-2 font-medium">{t("token.name")}</th>
+                <th className="px-4 py-2 font-medium">{t("token.key")}</th>
+                <th className="px-4 py-2 font-medium">{t("token.status")}</th>
+                <th className="px-4 py-2 font-medium">{t("token.created")}</th>
+                <th className="px-4 py-2 font-medium w-24">{t("common.action")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((key) => (
+                <tr key={key.id} className="border-b last:border-b-0 hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium">{key.name}</td>
+                  <td className="px-4 py-3">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                      {key.key.slice(0, 8)}...{key.key.slice(-4)}
+                    </code>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={key.enabled ? "text-green-600" : "text-muted-foreground"}>
+                      {key.enabled ? t("token.active") : t("token.disabled")}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(key.created_at)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => copyKey(key.key, key.id)}
+                      >
+                        {copiedId === key.id ? (
+                          <Check className="h-3.5 w-3.5 text-green-600" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                      <Switch
+                        checked={key.enabled}
+                        onCheckedChange={(checked) =>
+                          toggleMutation.mutate({ id: key.id, enabled: checked })
+                        }
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => deleteMutation.mutate(key.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
         <div className="flex h-64 items-center justify-center text-muted-foreground">
           {t("common.noData")}
         </div>
