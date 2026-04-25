@@ -73,7 +73,6 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
     abortRef.current = abortController;
 
     const start = performance.now();
-    let firstChunkTime = 0;
     let connect_ms = 0;
     let think_ms = 0;
     let prompt_tokens = 0;
@@ -86,7 +85,7 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
         body: JSON.stringify({
           model: entry.model,
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          stream: true,
+          stream: false,
         }),
         signal: abortController.signal,
       });
@@ -96,56 +95,18 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-          const payload = trimmed.slice(6);
-          if (payload === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(payload);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) {
-              if (firstChunkTime === 0) {
-                firstChunkTime = performance.now();
-                connect_ms = Math.round(firstChunkTime - start);
-              }
-              fullContent += delta;
-
-              // Extract usage if present in stream
-              if (parsed.usage) {
-                prompt_tokens = parsed.usage.prompt_tokens || 0;
-                completion_tokens = parsed.usage.completion_tokens || 0;
-              }
-            }
-          } catch {
-            // Skip malformed JSON
-          }
-        }
-      }
-
-      const endTime = performance.now();
-      think_ms = Math.round(endTime - firstChunkTime);
+      const data = await response.json();
+      connect_ms = Math.round(performance.now() - start);
+      const content = data.choices?.[0]?.message?.content || "";
+      prompt_tokens = data.usage?.prompt_tokens || 0;
+      completion_tokens = data.usage?.completion_tokens || 0;
 
       if (!abortController.signal.aborted) {
         setMessages([...newMessages, {
           role: "assistant",
-          content: fullContent,
+          content,
           connect_ms,
-          think_ms,
+          think_ms: 0,
           usage: prompt_tokens + completion_tokens > 0
             ? { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens }
             : undefined,
