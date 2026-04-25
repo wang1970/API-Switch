@@ -50,16 +50,22 @@ export default function App() {
 
   // Check for updates on startup
   useEffect(() => {
-    const unlisten = listen<{ current: string; latest: string; url: string }>(
-      "update-available",
-      (event) => {
-        setUpdateInfo(event.payload);
-      }
-    );
-    checkUpdate();
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    let mounted = true;
+    (async () => {
+      const unlisten = await listen<{ current: string; latest: string; url: string }>(
+        "update-available",
+        (event) => {
+          if (mounted) setUpdateInfo(event.payload);
+        }
+      );
+      // Now listener is ready, check for updates
+      await checkUpdate();
+      // Cleanup
+      return () => {
+        mounted = false;
+        unlisten();
+      };
+    })();
   }, []);
 
   // Apply locale and theme
