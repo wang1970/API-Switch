@@ -3,6 +3,7 @@ use super::handlers::ProxyError;
 use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, Database};
+use crate::{build_tray_menu, TRAY_ID};
 use tauri::Emitter;
 use axum::body::Body;
 use axum::http::HeaderMap;
@@ -537,9 +538,18 @@ fn append_and_parse_sse(
     }
 }
 
+fn refresh_tray(app_handle: &tauri::AppHandle) {
+    if let Ok(new_menu) = build_tray_menu(app_handle) {
+        if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+}
+
 async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     let _ = state.db.set_entry_cooldown(entry_id, None);
     let _ = state.app_handle.emit("entries-changed", ());
+    refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
     let recovery_secs = state.db.get_settings().ok()
@@ -561,6 +571,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
     let _ = state.app_handle.emit("entries-changed", ());
+    refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
     let threshold = settings
@@ -595,6 +606,7 @@ fn spawn_record_circuit_success(
 
         let _ = db.set_entry_cooldown(&entry_id, None);
         let _ = app_handle.emit("entries-changed", ());
+        refresh_tray(&app_handle);
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
@@ -626,6 +638,7 @@ fn spawn_cool_down_entry(
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
         let _ = app_handle.emit("entries-changed", ());
+        refresh_tray(&app_handle);
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
