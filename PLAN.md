@@ -45,7 +45,7 @@
 │                    Tauri App Window                   │
 │  ┌───────────────────────────────────────────────┐  │
 │  │              React Frontend (Vite)             │  │
-│  │  Dashboard │ Channel │ Pool │ Logs │ Settings  │  │
+│  │ Dashboard │ Channel │ API 管理 │ Token │ Logs │ Settings │  │
 │  └──────────────┬────────────────────────────────┘  │
 │                 │ Tauri IPC (invoke)                  │
 │  ┌──────────────▼────────────────────────────────┐  │
@@ -125,11 +125,11 @@
 - `ProxyError` 枚举: Unauthorized / NoAvailableProvider / AllProvidersFailed / Internal
 
 #### `proxy/router.rs` — 智能路由
-- 接收 `enabled_entries`（仅启用的）和 `all_entries`（含禁用的）两组列表
-- `model == "auto"`: 仅使用 enabled 条目（AUTO 选择范围）
-- 精确匹配 model: 从 ALL 条目中查找（含 disabled），匹配到的 + enabled 条目作为 fallback（保证不断链）
-- 错误模型名: fallback 到 enabled 条目（AUTO 行为）
-- 熔断条目自动跳过
+- 正式代理仅接收 enabled entries，disabled 条目不进入正式转发池（对齐 NEW-API enabled-channel pool）
+- `model == "auto"`: 使用 enabled + circuit available 条目，按 `sort_index, created_at` 稳定排序
+- 精确匹配 model: 先尝试 enabled 条目中的同名模型，再追加 AUTO 池作为 fallback，保证不断链
+- 错误模型名: fallback 到 AUTO 池
+- 熔断 open 条目自动跳过；disabled 条目仅保留给测试对话/测试命令直接调用
 
 #### `proxy/auth.rs` — 认证
 - 从 `Authorization: Bearer <key>` 提取密钥
@@ -138,13 +138,16 @@
 #### `proxy/forwarder.rs` — 请求转发
 - 按条目列表逐个尝试（failover）
 - 通过 `protocol::get_adapter()` 获取适配器，统一调用 trait 方法
+- 复用 `ProxyState.http_client`（reqwest Client，30s connect timeout）
 - 支持流式 (SSE) 和非流式响应
   - SSE: 根据 `adapter.needs_sse_transform()` 分两条路径
     - OpenAI/Custom/Gemini/Azure: 原始字节透传，旁路提取 usage
     - Claude: 解析→转换→重建（Anthropic SSE → OpenAI chunk 格式），部分 SSE 行缓存时 `cx.waker().wake_by_ref()` 防止流挂起
+- 流式生命周期对齐 NEW-API 核心思路：SSE ping 保活、300s idle timeout、`StreamEndReason`、drop 兜底日志
+- 记录 `attempt_path`（entry/channel/model/status/success/error），便于排查 failover 路径
 - Token 用量统计（从响应中提取 prompt/completion tokens）
 - 记录首次 token 延迟 (first_token_ms)
-- 成功/失败反馈到熔断器
+- 非流式成功立即反馈熔断器；流式成功延后到 body done 后记录，stream timeout/upstream_error 记录失败
 - 所有结果写入 usage_logs
 
 #### `proxy/circuit_breaker.rs` — 熔断器
@@ -169,12 +172,12 @@
 | 模块 | 命令 | 说明 |
 |------|------|------|
 | `channel` | list/create/update/delete, fetch_models, select_models, test_chat | 渠道管理 + 模型拉取 + 连通性测试 |
-| `pool` | list/toggle/reorder/create_entry | API 池管理 + 拖拽排序 |
+| `pool` | list/toggle/reorder/create_entry | API 管理（路由池）+ 拖拽排序 |
 | `token` | list/create/delete/toggle_access_key | 访问密钥管理 |
 | `usage` | get_usage_logs, get_dashboard_stats, get_model_consumption, get_call_trend, get_model/user_distribution, get_model/user_ranking | 统计数据 |
 | `config` | get_settings, update_settings | 全局配置 |
 | `proxy_cmd` | start_proxy, stop_proxy, get_proxy_status | 代理服务器控制 |
-| `test_chat` | test_chat | API 池测试对话（直接通过适配器调用上游，不走路由） |
+| `test_chat` | test_chat | API 管理测试对话（直接通过适配器调用上游，不走路由） |
 
 ### 3.2 前端模块 (`src/`)
 
@@ -225,12 +228,11 @@ Client → POST /v1/chat/completions
   │     │   ├─ protocol::get_adapter(api_type) → adapter
   │     │   ├─ adapter.build_chat_url() + adapter.apply_auth() + adapter.transform_request()
   │     │   ├─ reqwest::send()                  ← HTTP 转发到上游
-  │     │   ├─ 成功 → circuit_breaker::record_success()
-  │     │   │         → adapter.transform_response() / adapter.needs_sse_transform()
-  │     │   │         → 解析响应/token → 返回客户端
-  │     │   └─ 失败 → circuit_breaker::record_failure() → 尝试下一个
+  │     │   ├─ 非流式成功 → transform_response() → 记录 success/circuit → 返回客户端
+  │     │   ├─ 流式成功   → 返回 SSE body，body done 后记录 success/circuit
+  │     │   └─ 失败       → 记录日志/熔断/禁用副作用 → 按 retry 策略尝试下一个
   │     └─ 全部失败 → 502 AllProvidersFailed
-  └─ 5. insert_usage_log()              ← 无论成败，记录完整日志
+  └─ 5. insert_usage_log()              ← 无论成败，记录 usage log + attempt_path
 ```
 
 ### 4.2 前端数据流
@@ -276,8 +278,8 @@ React Component → TanStack Query (useQuery/useMutation)
 - [x] Channel 管理页面（平铺列表 + 操作列导入/编辑/删除 + 创建/编辑弹窗 + 导入模型弹窗含拉取 + 连通性测试弹窗 + TanStack React Query）
 - [x] API 管理页面（拖拽排序 @dnd-kit + 新建弹窗 + 测试对话弹窗 + 渠道/模型双行显示）
 - [x] **TestChatDialog 组件**: 测试对话弹窗，HTTP fetch 走代理端口，使用非流式请求提升兼容性，显示耗时与 IN/OUT token 统计
-- [x] **渠道添加/编辑统一弹窗**: 基础配置 + 内嵌模型拉取/选择，保存时同步到 API 池，新增模型默认 disabled
-- [x] **路由 fallback 不断链**: 精确匹配条目（含 disabled）+ enabled 条目作为 auto-fallback，错误模型名直接 fallback 到 AUTO
+- [x] **渠道添加/编辑统一弹窗**: 基础配置 + 内嵌模型拉取/选择，保存时同步到 API 管理，新增模型默认 disabled
+- [x] **路由 fallback 不断链**: 正式代理仅使用 enabled 条目；精确模型优先匹配 enabled 同名条目，再 fallback 到 AUTO 池；错误模型名直接 fallback 到 AUTO
 - [x] Token 密钥管理页面（独立页面，创建/删除/启停 + Key 复制）
 - [x] Log 日志页面（分页 + 多维筛选 + 详情展开）
 - [x] Settings 设置页面（代理/熔断/语言/主题）
@@ -291,39 +293,31 @@ React Component → TanStack Query (useQuery/useMutation)
 ### ~~P0 — 关键缺失~~
 - ~~**cargo-tauri CLI 安装**: `@tauri-apps/cli` 已在 devDependencies，`pnpm tauri dev` 可直接使用~~
 
-### P1 — 稳定性与可观测性
-- [x] **正式代理路由不应命中 disabled 条目**: 已修复。正式代理路由对齐 NEW-API enabled-channel pool 行为，显式模型只从 enabled entries 匹配；disabled entry 仅保留给测试对话/测试命令直接调用。
-- [x] **Claude SSE 转换补标准事件分隔**: 已修复。`transform_sse_chunk()` 对 Claude 转换路径输出标准 SSE frame：`data: ...\n\n`，`[DONE]` 同样输出 `data: [DONE]\n\n`。
-- [x] **流式超时保护**: 已实现简化版 NEW-API streaming timeout。流式 idle 超过 300s 会记录 `stream_end_reason=timeout` 并结束，HTTP 连接阶段另有 30s connect timeout。
-- [ ] **客户端断开检测**: 客户端断开后仍等待上游完成，可能浪费上游额度。参考 NEW-API `c.Request.Context().Done()` 主动检测
-- [x] **SSE Ping 保活**: 已实现简化版 NEW-API ping keep-alive。流式响应每 10s 发送 SSE comment `: PING\n\n`，降低长思考模型被中间代理断开的概率。
-- [x] **StreamLogGuard drop 日志状态修正**: 已部分修复。流式 body 提前 drop 时不再固定记 success=true，而是记录 success=false、`stream_end_reason=dropped` 和错误信息；后续继续细分 client_gone/timeout。
-- [x] **重试路径记录**: 已部分实现。usage log `other.attempt_path` 记录每次尝试的 entry/channel/model/status/success/error，方便个人排障。
-- [x] **流结束原因追踪**: 已实现基础 `StreamEndReason`（done/upstream_error/timeout/dropped）并写入 usage log `other.stream_end_reason`；client_gone/scanner_error 作为后续细分。
-- [ ] **错误提示优化**: 前端统一 Toast 错误提示，替代零散 `alert()` 与局部错误文案
+### P1 — 个人使用体验与稳定性
+- [ ] **客户端断开精准检测**: 当前 stream body 提前 drop 会记录 `stream_end_reason=dropped`，但尚不能精确区分 client_gone / runtime cancellation / 其他 drop。后续细分为 `client_gone`，避免客户端取消后继续消耗上游额度。
+- [ ] **前端统一 Toast 错误提示**: 替代零散 `alert()`、静默失败和局部错误文案，提升日常使用体验。
 
-### P2 — 体验增强
-- [ ] **504/524 重试策略讨论**: 当前硬编码 504/524 永不重试。个人工具场景下可能更希望继续 failover 到下一个渠道，建议讨论是否改为配置项或并入 retry_codes。
-- [x] **reqwest Client 复用**: 已完成。`ProxyState` 持有全局 `reqwest::Client`，转发时复用连接池，并保留 30s connect timeout。
-- [ ] **非流式上游 header 保留**: 当前非流式响应重建为 `axum::Json`，不透传上游 request id / rate limit 等 headers。个人使用可接受，后续如需排障可补充关键 header。
-- [ ] **CLI 配置片段生成**: 在 UI 中提供 bash / PowerShell 环境变量片段（如 `OPENAI_BASE_URL`、`OPENAI_API_KEY`），优先提供复制命令，不直接写系统环境变量
-- [ ] **模型切换通知**: 故障转移导致模型切换时，通过 SSE 自定义事件 `event: model_switch` 或响应扩展字段通知下游客户端实际使用的模型及切换原因（如 provider_unavailable）
-- [ ] **验证 auto 模式模型名透传**: 用户用 `model: "auto"` 对话时，客户端 UI 应显示实际使用的模型名（如 `glm-5-turbo`）。因为 `transform_request` 会把 body 里的 model 替换为实际模型名，上游响应会带实际模型名透传回客户端。需实际测试验证链路是否完整。
-- [x] **实时日志推送**: 后端 `log_usage()` 写 DB 后通过 `emit("new-usage-log")` 推送事件，前端 `LogPage` 监听并自动刷新
-- [ ] **请求/响应 Mock**: 前端开发时缺少 Mock 数据，开发体验不佳
-- [ ] **响应式布局**: 当前 min 800×600，小屏适配
-- [x] **验证矩阵补充**: 增加各 API 类型的拉取模型、非流式、流式、工具调用、图片输入、错误码透传端到端验证状态
+### P2 — 常用体验增强
+- [ ] **CLI 配置片段生成**: 在 UI 中提供 PowerShell / bash 环境变量片段（如 `OPENAI_BASE_URL`、`OPENAI_API_KEY`），优先提供复制命令，不自动写系统环境变量。
+- [ ] **auto 模式实际模型名验证**: 确认 `model: "auto"` 时客户端、日志、测试对话能看到最终命中模型；必要时在 UI 中展示实际 resolved model。
+- [ ] **模型切换可见性增强**: 优先在日志和测试对话展示实际命中模型与 fallback 路径；SSE 自定义事件 `event: model_switch` 仅作为可选方案，避免影响客户端兼容性。
+- [ ] **响应式布局优化**: 改善小窗口、分屏使用体验；当前最小窗口约 800×600。
 
-### P3 — 可选能力 / 未来愿景
-- [ ] **自动更新**: 当前仅完成 GitHub Releases 更新检查，Tauri updater 自动下载/安装可后续集成
-- [ ] **熔断状态持久化**: 当前内存态，重启后丢失所有熔断历史；个人工具场景可接受，持久化为可选增强
-- [ ] **Gemini 原生格式验证**: 当前 Gemini 适配器使用 Google OpenAI 兼容端点 (`/v1beta/openai/`)，原生格式转换函数已实现但未接入 trait（可作为备选方案）
-- [ ] **Azure deployment 验证**: Azure 适配器已实现完整 URL 路径 + api-key 认证 + 模型列表解析，待有 Azure 资源后端到端验证
-- [ ] **监听地址可配置**: 个人局域网场景可选 `127.0.0.1` / `0.0.0.0`，默认继续保持开箱即用
-- [ ] **API Key 加密存储**: 当前明文存储是个人本地工具的设计取舍；如后续需要可接入系统 Keychain / DPAPI / Keyring
-- [ ] **多用户隔离**: 按 Access Key 做用量配额限制（超出个人工具核心定位）
-- [ ] **插件系统**: 支持自定义中间件（如日志脱敏、请求改写）
-- [ ] **集群部署**: 支持 SQLite → PostgreSQL 迁移，多实例负载均衡（超出个人工具核心定位）
+### P3 — 可选增强
+- [ ] **504/524 failover 策略配置化**: 默认保持 NEW-API 不重试策略；如个人偏好“尽量连上”，可选继续 failover 到下一个渠道。
+- [ ] **上游关键 header 记录**: 优先记录 request-id / rate-limit 到日志，非必要不完整透传所有上游 headers。
+- [ ] **SSE ping / timeout 配置化**: 当前 ping interval=10s、streaming idle timeout=300s 为代码常量，后续可接入 Settings 页面。
+- [ ] **自动更新**: 当前仅完成 GitHub Releases 更新检查，Tauri updater 自动下载/安装可后续集成。
+- [ ] **Gemini 原生格式验证**: 当前使用 Google OpenAI 兼容端点 (`/v1beta/openai/`)，原生格式转换函数作为备选方案。
+- [ ] **Azure deployment 端到端验证**: Azure 适配器已实现完整 URL 路径 + api-key 认证 + 模型列表解析，待有 Azure 资源后验证。
+- [ ] **监听地址可配置**: 个人局域网场景可选 `127.0.0.1` / `0.0.0.0`，默认继续保持开箱即用。
+
+### 未来愿景（非个人工具核心）
+- [ ] **API Key 加密存储**: 当前明文存储是个人本地工具的设计取舍；如后续需要可接入系统 Keychain / DPAPI / Keyring。
+- [ ] **熔断状态持久化**: 默认内存态更符合轻量个人工具；持久化仅作为长期屏蔽坏渠道的可选能力。
+- [ ] **多用户隔离**: 按 Access Key 做用量配额限制，超出个人本地工具核心定位。
+- [ ] **插件系统**: 支持日志脱敏、请求改写等自定义中间件，属于扩展方向。
+- [ ] **集群部署**: SQLite → PostgreSQL、多实例负载均衡，超出个人本地工具定位。
 
 ---
 
@@ -408,12 +402,12 @@ api-switch/
 │       │   ├── usage.rs                    # 统计命令
 │       │   ├── config.rs                   # 配置命令
 │       │   ├── proxy_cmd.rs               # 代理控制命令
-│       │   └── test_chat.rs              # API 池测试对话命令 (直接适配器调用)
+│       │   └── test_chat.rs              # API 管理测试对话命令（直接适配器调用）
 │       └── proxy/
 │           ├── mod.rs                      # 模块导出
 │           ├── server.rs                   # Axum 服务器
 │           ├── handlers.rs                 # 请求处理
-│           ├── router.rs                   # 智能路由 (enabled+all双列表, fallback不断链)
+│           ├── router.rs                   # 智能路由（enabled-only 正式路由 + AUTO fallback）
 │           ├── auth.rs                     # 认证
 │           ├── forwarder.rs                # 转发 + 重试
 │           ├── circuit_breaker.rs          # 熔断器
@@ -489,11 +483,11 @@ api-switch/
 
 ---
 
-## 12. 转发核心待讨论问题
+## 12. 转发核心状态
 
-> 2026-04-25 检查 `handlers.rs` / `router.rs` / `forwarder.rs` / `auth.rs` / `server.rs` / 协议适配器后记录。以下问题先固化到计划，后续逐个讨论并决定是否修复。
+> 2026-04-25 对照 NEW-API relay / stream / channel selection 后整理。已完成项保留为当前核心状态，未完成项继续作为待讨论/待实现事项。
 
-| 优先级 | 问题 | 当前表现 | 初步建议 |
+| 优先级 | 项目 | 当前状态 | 后续 |
 |---|---|---|---|
 | P1 ✅ | 显式模型路由可能命中 disabled 条目 | 已修复：正式代理只从 enabled entries 匹配显式模型，disabled 条目不再进入正式代理路由 | 已加 router 单元测试覆盖 auto、显式匹配、fallback、熔断跳过 |
 | P1 ✅ | Claude SSE 转换缺少标准空行分隔 | 已修复：Claude 转换路径统一输出 `data: ...\n\n`，包括 `[DONE]` | 已加 SSE frame 单元测试 |
@@ -504,6 +498,17 @@ api-switch/
 | P2 ✅ | 每次请求创建 reqwest Client | 已修复：`ProxyState` 持有全局 `reqwest::Client`，转发时复用连接池，并保留 30s connect timeout | 后续可继续调优连接池参数 |
 | P2 | 非流式响应不透传上游 headers | `axum::Json` 重建响应会丢失 request id / rate limit 等 headers | 保留关键 headers 或在日志中记录 |
 | P3 | 流式首字时间不是严格首 token | 当前记录上游第一个 chunk；Claude 可能先发 metadata / message_start | 后续可在第一个有效 content delta 时记录 |
+
+### 12.1 AUTO 机制当前语义
+
+| 场景 | 行为 |
+|---|---|
+| `model = "auto"` | 使用 enabled + circuit available 条目，按 `sort_index, created_at` 稳定排序依次尝试 |
+| 显式模型且存在 enabled 同名条目 | 同名条目优先，随后追加 AUTO 池作为 fallback |
+| 显式模型不存在 / 输入错误 | 直接 fallback 到 AUTO 池，避免客户端断链 |
+| disabled 条目 | 不进入正式代理路由，仅测试对话/测试命令可直接调用 |
+| circuit open 条目 | 路由阶段跳过，恢复期后由 CircuitBreaker half-open 探测 |
+| 新同步模型 | 默认 disabled；批量新增时分配递增 `sort_index`，避免 AUTO 排序不稳定 |
 
 ---
 
@@ -533,6 +538,37 @@ api-switch/
 
 ---
 
+### 2026-04-26 — 托盘菜单同步刷新修复（v0.2.0-dev）
+
+**改动文件**: 2 个文件（`commands/pool.rs`、`commands/channel.rs`）
+
+**BUG 描述**: 在 API 管理页拖拽置顶/排序模型后，系统托盘菜单中的模型次序未同步更新。托盘内点击模型置顶可正常刷新，但从前端 API 管理页操作后托盘菜单不会重建。
+
+**根因**: 后端 `pool.rs` 和 `channel.rs` 中影响模型列表的 6 个命令，只更新了数据库，没有调用 `build_tray_menu()` + `tray.set_menu()` 刷新托盘。托盘菜单仅在应用启动和托盘内点击模型时才重建。
+
+|| # | 命令 | 文件 | 影响场景 |
+||---|------|------|----------|
+|| 1 | `reorder_entries` | pool.rs | API 管理页拖拽排序/置顶 ← 用户报告的核心 BUG |
+|| 2 | `toggle_entry` | pool.rs | API 管理页开关模型 |
+|| 3 | `create_entry` | pool.rs | 添加新模型到 API 池 |
+|| 4 | `select_models` | channel.rs | 渠道勾选/取消模型 |
+|| 5 | `update_channel` | channel.rs | 禁用渠道（级联禁用 entries） |
+|| 6 | `delete_channel` | channel.rs | 删除渠道 |
+
+**修复方式**: 每个命令新增 `app: tauri::AppHandle` 参数，操作完数据库后统一调用：
+```rust
+if let Ok(new_menu) = build_tray_menu(&app) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_menu(Some(new_menu));
+    }
+}
+```
+与 `lib.rs` 中托盘点击置顶的已有逻辑保持一致。
+
+**编译状态**: `cargo check` 0 errors, 19 warnings（均为已有的 dead_code）
+
+---
+
 ### 2026-04-25 — UI 体验优化（v0.2.0-dev）
 
 **改动文件**: 5 个文件
@@ -543,7 +579,7 @@ api-switch/
 | 2 | **复制按钮位置** | 复制按钮从操作列移到密钥文本后面，更符合常规交互习惯 |
 | 3 | **i18n 补充** | 新增 `common.action` 翻译（中文"操作"，英文"Actions"） |
 | 4 | **渠道默认类型** | 新建渠道默认 API 类型从 `openai` 改为 `custom`（使用量最大） |
-| 5 | **移除拖拽滚动** | 移除 `useDragScroll` hook，与 dnd-kit 拖拽排序冲突导致体验不佳，API 池拖拽排序保留 |
+| 5 | **移除拖拽滚动** | 移除 `useDragScroll` hook，与 dnd-kit 拖拽排序冲突导致体验不佳，API 管理拖拽排序保留 |
 
 ---
 
@@ -608,7 +644,7 @@ api-switch/
 - `shouldRetry()`: 独立重试决策，`ShouldDisableChannel` 和 `shouldRetry` 是两套独立机制
 - `ShouldDisableByStatusCode(401)`: 异步禁用渠道，但 401 在 retry 范围内，当前请求仍 failover
 
-**对比结论 — 核心转发已对齐**:
+**当时对比结论 — 后续已在 v0.2.0-dev 继续补齐**:
 
 | NEW-API 机制 | api-switch 状态 | 说明 |
 |-------------|----------------|------|
@@ -620,11 +656,11 @@ api-switch/
 | `ShouldDisableChannel` 禁用 | ✅ `disable_codes` + `toggle_entry(false)` | |
 | 关键词自动禁用 | ✅ `disable_keywords` + `toggle_entry(false)` | |
 | 504/524 永不重试 | ✅ 硬编码 | |
-| SSE Ping 保活 | ❌ 待实现 P2 | NEW-API: `startPingKeepAlive` goroutine |
+| SSE Ping 保活 | ✅ 后续已实现 | NEW-API: `startPingKeepAlive` goroutine |
 | 客户端断开检测 | ❌ 待实现 P2 | NEW-API: `c.Request.Context().Done()` |
-| 流超时保护 | ❌ 待实现 P2 | NEW-API: `streamingTimeout` ticker |
-| 重试路径记录 | ❌ 待实现 P3 | NEW-API: `重试: 1->2->3` |
-| 流结束原因追踪 | ❌ 待实现 P3 | NEW-API: `StreamEndReason` 枚举 |
+| 流超时保护 | ✅ 后续已实现 | NEW-API: `streamingTimeout` ticker |
+| 重试路径记录 | ✅ 后续已实现 | NEW-API: `重试: 1->2->3`，API Switch 记录为 `attempt_path` |
+| 流结束原因追踪 | ✅ 后续已实现基础版 | done/upstream_error/timeout/dropped，client_gone 待细分 |
 | 熔断持久化 | ❌ 待实现 P3 | |
 
 **编译状态**: `cargo check` 0 errors | `cargo test` 92 passed | `pnpm typecheck` 0 errors

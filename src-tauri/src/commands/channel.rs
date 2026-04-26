@@ -2,8 +2,10 @@ use crate::database::{Channel, ModelInfo};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
 use crate::AppState;
+use crate::TRAY_ID;
+use crate::build_tray_menu;
 use serde::Deserialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(Deserialize)]
 pub struct CreateChannelParams {
@@ -42,7 +44,7 @@ pub fn create_channel(state: State<'_, AppState>, params: CreateChannelParams) -
 }
 
 #[tauri::command]
-pub fn update_channel(state: State<'_, AppState>, params: UpdateChannelParams) -> Result<Channel, AppError> {
+pub fn update_channel(app: tauri::AppHandle, state: State<'_, AppState>, params: UpdateChannelParams) -> Result<Channel, AppError> {
     // If disabling, also disable all associated API pool entries
     if let Some(false) = params.enabled {
         state.db.disable_entries_for_channel(&params.id)?;
@@ -57,12 +59,23 @@ pub fn update_channel(state: State<'_, AppState>, params: UpdateChannelParams) -
         params.enabled,
         params.notes.as_deref(),
     )?;
+    if let Ok(new_menu) = build_tray_menu(&app) {
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
     state.db.get_channel(&params.id)
 }
 
 #[tauri::command]
-pub fn delete_channel(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
-    state.db.delete_channel(&id)
+pub fn delete_channel(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    state.db.delete_channel(&id)?;
+    if let Ok(new_menu) = build_tray_menu(&app) {
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -95,6 +108,7 @@ pub async fn fetch_models_direct(
 
 #[tauri::command]
 pub fn select_models(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     channel_id: String,
     model_names: Vec<String>,
@@ -102,6 +116,11 @@ pub fn select_models(
     let channel = state.db.get_channel(&channel_id)?;
     state.db.update_channel_models(&channel_id, &channel.available_models, &model_names)?;
     state.db.sync_entries_for_channel(&channel_id, &model_names)?;
+    if let Ok(new_menu) = build_tray_menu(&app) {
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
     Ok(())
 }
 
