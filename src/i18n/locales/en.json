@@ -21,6 +21,8 @@
     "channel": "Channel",
     "model": "Model",
     "selectChannel": "Select Channel",
+    "noChannels": "No channels yet. Add one in Channel Management first.",
+    "noEnabledChannels": "All channels are disabled. Enable at least one in Channel Management first.",
     "selectModel": "Select Model",
     "modelPlaceholder": "Enter model name, e.g. gpt-4o, claude-3.5-sonnet",
     "displayName": "Display Name",

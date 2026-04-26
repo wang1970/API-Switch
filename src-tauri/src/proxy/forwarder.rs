@@ -4,7 +4,6 @@ use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, Database};
 use crate::{build_tray_menu, TRAY_ID};
-use tauri::Emitter;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -16,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
+use tauri::Emitter;
 use tokio::time::sleep;
 
 const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -64,7 +64,7 @@ fn attempt_path_json(attempts: &[AttemptInfo]) -> String {
                     "error": a.error,
                 })
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_string())
 }
@@ -78,7 +78,10 @@ fn push_attempt(
 ) {
     attempts.push(AttemptInfo {
         entry_id: entry.id.clone(),
-        channel_name: entry.channel_name.clone().unwrap_or_else(|| "unknown".to_string()),
+        channel_name: entry
+            .channel_name
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
         model: entry.model.clone(),
         status_code,
         success,
@@ -138,13 +141,21 @@ impl Drop for StreamLogGuard {
                 Some("stream dropped before normal completion".to_string()),
             );
             log_usage(
-                &self.db, &self.app_handle, self.access_key.as_ref(), &self.entry, &self.requested_model,
-                true, self.prompt_tokens.load(Ordering::SeqCst),
+                &self.db,
+                &self.app_handle,
+                self.access_key.as_ref(),
+                &self.entry,
+                &self.requested_model,
+                true,
+                self.prompt_tokens.load(Ordering::SeqCst),
                 self.completion_tokens.load(Ordering::SeqCst),
                 self.first_token_ms.load(Ordering::SeqCst),
                 self.start.elapsed().as_millis() as i64,
-                self.status_code, false, Some("stream dropped before normal completion"),
-                Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
+                self.status_code,
+                false,
+                Some("stream dropped before normal completion"),
+                Some(attempt_path.as_str()),
+                Some(StreamEndReason::Dropped),
             );
         }
     }
@@ -181,7 +192,17 @@ pub async fn forward_with_retry(
             }
         }
 
-        match forward_single(state, entry, body, requested_model, access_key, is_stream, attempts.clone()).await {
+        match forward_single(
+            state,
+            entry,
+            body,
+            requested_model,
+            access_key,
+            is_stream,
+            attempts.clone(),
+        )
+        .await
+        {
             Ok(result) => {
                 let elapsed = start.elapsed();
 
@@ -191,10 +212,21 @@ pub async fn forward_with_retry(
                     let attempt_path = attempt_path_json(&attempts);
                     let latency_ms = elapsed.as_millis() as i64;
                     log_usage(
-                        &state.db, &state.app_handle, access_key, entry, requested_model,
-                        is_stream, result.prompt_tokens, result.completion_tokens,
-                        result.first_token_ms, latency_ms, result.status_code, true, None,
-                        Some(attempt_path.as_str()), None,
+                        &state.db,
+                        &state.app_handle,
+                        access_key,
+                        entry,
+                        requested_model,
+                        is_stream,
+                        result.prompt_tokens,
+                        result.completion_tokens,
+                        result.first_token_ms,
+                        latency_ms,
+                        result.status_code,
+                        true,
+                        None,
+                        Some(attempt_path.as_str()),
+                        None,
                     );
                 }
                 return Ok(result.response);
@@ -208,9 +240,21 @@ pub async fn forward_with_retry(
 
                 // Step 1: Always write usage log for every failed attempt
                 log_usage(
-                    &state.db, &state.app_handle, access_key, entry, requested_model,
-                    is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
-                    Some(attempt_path.as_str()), None,
+                    &state.db,
+                    &state.app_handle,
+                    access_key,
+                    entry,
+                    requested_model,
+                    is_stream,
+                    0,
+                    0,
+                    0,
+                    latency_ms,
+                    log_status,
+                    false,
+                    Some(&e),
+                    Some(attempt_path.as_str()),
+                    None,
                 );
 
                 // Step 2: mark this entry as abnormal and cool it down.
@@ -225,7 +269,10 @@ pub async fn forward_with_retry(
     Err(last_error
         .map(|(msg, status)| {
             if status > 0 {
-                ProxyError::Upstream { status, message: msg }
+                ProxyError::Upstream {
+                    status,
+                    message: msg,
+                }
             } else {
                 ProxyError::Internal(msg)
             }
@@ -281,12 +328,23 @@ async fn forward_single(
     if is_stream {
         let needs_transform = adapter.needs_sse_transform();
         let response = build_streaming_response(
-            state, entry, access_key, requested_model,
-            response, status_code, needs_transform, adapter, request_start, prior_attempts,
+            state,
+            entry,
+            access_key,
+            requested_model,
+            response,
+            status_code,
+            needs_transform,
+            adapter,
+            request_start,
+            prior_attempts,
         );
         Ok(ForwardResult {
-            response, prompt_tokens: 0, completion_tokens: 0,
-            first_token_ms: 0, status_code,
+            response,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            first_token_ms: 0,
+            status_code,
         })
     } else {
         let mut response_body: Value = response
@@ -299,7 +357,10 @@ async fn forward_single(
 
         Ok(ForwardResult {
             response: axum::Json(response_body).into_response(),
-            prompt_tokens, completion_tokens, first_token_ms: 0, status_code,
+            prompt_tokens,
+            completion_tokens,
+            first_token_ms: 0,
+            status_code,
         })
     }
 }
@@ -366,114 +427,172 @@ fn build_streaming_response(
         prior_attempts: prior_attempts.clone(),
     };
 
-    let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
-        let _ = &guard; // keep guard alive in the closure's capture list
+    let body_stream =
+        futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
+            let _ = &guard; // keep guard alive in the closure's capture list
 
-        if ping_interval.as_mut().poll(cx).is_ready() {
-            ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
-            return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
-        }
-
-        if idle_timeout.as_mut().poll(cx).is_ready() {
-            if !logged.swap(true, Ordering::SeqCst) {
-                let attempt_path = attempt_path_with_current(
-                    &prior_attempts,
-                    &entry,
-                    504,
-                    false,
-                    Some("stream idle timeout".to_string()),
-                );
-                log_usage(
-                    &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                    true, prompt_tokens.load(Ordering::SeqCst),
-                    completion_tokens.load(Ordering::SeqCst),
-                    first_token_ms.load(Ordering::SeqCst),
-                    start.elapsed().as_millis() as i64,
-                    504, false, Some("stream idle timeout"),
-                    Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
-                );
-                spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+            if ping_interval.as_mut().poll(cx).is_ready() {
+                ping_interval
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
+                return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
             }
-            return Poll::Ready(Some(Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "stream idle timeout",
-            ))));
-        }
 
-        match upstream_stream.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(chunk))) => {
-                idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
-                if !seen_first_chunk.swap(true, Ordering::SeqCst) {
-                    first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
-                }
-
-                if needs_transform {
-                    if let Some(transformed) = transform_sse_chunk(
-                        &chunk, &mut sse_buffer, &adapter,
-                        &prompt_tokens, &completion_tokens,
-                    ) {
-                        return Poll::Ready(Some(Ok(transformed)));
-                    } else {
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending;
-                    }
-                } else {
-                    append_and_parse_sse(&mut sse_buffer, &chunk, &prompt_tokens, &completion_tokens);
-                }
-
-                Poll::Ready(Some(Ok(chunk)))
-            }
-            Poll::Ready(Some(Err(err))) => {
+            if idle_timeout.as_mut().poll(cx).is_ready() {
                 if !logged.swap(true, Ordering::SeqCst) {
-                    let error_message = format!("Stream error: {err}");
                     let attempt_path = attempt_path_with_current(
                         &prior_attempts,
                         &entry,
-                        502,
+                        504,
                         false,
-                        Some(error_message.clone()),
+                        Some("stream idle timeout".to_string()),
                     );
                     log_usage(
-                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                        true, prompt_tokens.load(Ordering::SeqCst),
-                        completion_tokens.load(Ordering::SeqCst),
-                        first_token_ms.load(Ordering::SeqCst),
-                        start.elapsed().as_millis() as i64,
-                        502, false, Some(error_message.as_str()),
-                        Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
-                    );
-                    spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
-                }
-                Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
-            }
-            Poll::Ready(None) => {
-                if !logged.swap(true, Ordering::SeqCst) {
-                    let attempt_path = attempt_path_with_current(
-                        &prior_attempts,
+                        &db,
+                        &app_handle,
+                        access_key.as_ref(),
                         &entry,
-                        status_code,
+                        &requested_model,
                         true,
-                        None,
-                    );
-                    log_usage(
-                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                        true, prompt_tokens.load(Ordering::SeqCst),
+                        prompt_tokens.load(Ordering::SeqCst),
                         completion_tokens.load(Ordering::SeqCst),
                         first_token_ms.load(Ordering::SeqCst),
                         start.elapsed().as_millis() as i64,
-                        status_code, true, None,
-                        Some(attempt_path.as_str()), Some(StreamEndReason::Done),
+                        504,
+                        false,
+                        Some("stream idle timeout"),
+                        Some(attempt_path.as_str()),
+                        Some(StreamEndReason::Timeout),
                     );
-                    spawn_record_circuit_success(success_circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                    spawn_cool_down_entry(
+                        circuit_breakers.clone(),
+                        settings_db.clone(),
+                        entries_app_handle.clone(),
+                        entry_id.clone(),
+                    );
                 }
-                Poll::Ready(None)
+                return Poll::Ready(Some(Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "stream idle timeout",
+                ))));
             }
-            Poll::Pending => Poll::Pending,
-        }
-    });
+
+            match upstream_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(Ok(chunk))) => {
+                    idle_timeout
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
+                    if !seen_first_chunk.swap(true, Ordering::SeqCst) {
+                        first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
+                    }
+
+                    if needs_transform {
+                        if let Some(transformed) = transform_sse_chunk(
+                            &chunk,
+                            &mut sse_buffer,
+                            &adapter,
+                            &prompt_tokens,
+                            &completion_tokens,
+                        ) {
+                            return Poll::Ready(Some(Ok(transformed)));
+                        } else {
+                            cx.waker().wake_by_ref();
+                            return Poll::Pending;
+                        }
+                    } else {
+                        append_and_parse_sse(
+                            &mut sse_buffer,
+                            &chunk,
+                            &prompt_tokens,
+                            &completion_tokens,
+                        );
+                    }
+
+                    Poll::Ready(Some(Ok(chunk)))
+                }
+                Poll::Ready(Some(Err(err))) => {
+                    if !logged.swap(true, Ordering::SeqCst) {
+                        let error_message = format!("Stream error: {err}");
+                        let attempt_path = attempt_path_with_current(
+                            &prior_attempts,
+                            &entry,
+                            502,
+                            false,
+                            Some(error_message.clone()),
+                        );
+                        log_usage(
+                            &db,
+                            &app_handle,
+                            access_key.as_ref(),
+                            &entry,
+                            &requested_model,
+                            true,
+                            prompt_tokens.load(Ordering::SeqCst),
+                            completion_tokens.load(Ordering::SeqCst),
+                            first_token_ms.load(Ordering::SeqCst),
+                            start.elapsed().as_millis() as i64,
+                            502,
+                            false,
+                            Some(error_message.as_str()),
+                            Some(attempt_path.as_str()),
+                            Some(StreamEndReason::UpstreamError),
+                        );
+                        spawn_cool_down_entry(
+                            circuit_breakers.clone(),
+                            settings_db.clone(),
+                            entries_app_handle.clone(),
+                            entry_id.clone(),
+                        );
+                    }
+                    Poll::Ready(Some(Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err,
+                    ))))
+                }
+                Poll::Ready(None) => {
+                    if !logged.swap(true, Ordering::SeqCst) {
+                        let attempt_path = attempt_path_with_current(
+                            &prior_attempts,
+                            &entry,
+                            status_code,
+                            true,
+                            None,
+                        );
+                        log_usage(
+                            &db,
+                            &app_handle,
+                            access_key.as_ref(),
+                            &entry,
+                            &requested_model,
+                            true,
+                            prompt_tokens.load(Ordering::SeqCst),
+                            completion_tokens.load(Ordering::SeqCst),
+                            first_token_ms.load(Ordering::SeqCst),
+                            start.elapsed().as_millis() as i64,
+                            status_code,
+                            true,
+                            None,
+                            Some(attempt_path.as_str()),
+                            Some(StreamEndReason::Done),
+                        );
+                        spawn_record_circuit_success(
+                            success_circuit_breakers.clone(),
+                            settings_db.clone(),
+                            entries_app_handle.clone(),
+                            entry_id.clone(),
+                        );
+                    }
+                    Poll::Ready(None)
+                }
+                Poll::Pending => Poll::Pending,
+            }
+        });
 
     axum::http::Response::builder()
-        .status(axum::http::StatusCode::from_u16(status_code as u16).unwrap_or(axum::http::StatusCode::OK))
+        .status(
+            axum::http::StatusCode::from_u16(status_code as u16)
+                .unwrap_or(axum::http::StatusCode::OK),
+        )
         .header("content-type", "text/event-stream")
         .header("cache-control", "no-cache")
         .header("connection", "keep-alive")
@@ -494,25 +613,39 @@ fn transform_sse_chunk(
 
     while let Some(line_end) = buffer.find('\n') {
         let mut line = buffer.drain(..=line_end).collect::<String>();
-        if line.ends_with('\n') { line.pop(); }
-        if line.ends_with('\r') { line.pop(); }
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        if line.ends_with('\r') {
+            line.pop();
+        }
 
-        let Some(payload) = line.strip_prefix("data: ") else { continue };
+        let Some(payload) = line.strip_prefix("data: ") else {
+            continue;
+        };
         if payload == "[DONE]" {
             output.push(b"data: [DONE]\n\n".to_vec());
             continue;
         }
 
         let (prompt, completion) = adapter.extract_sse_usage(payload);
-        if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
-        if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
+        if prompt > 0 {
+            prompt_tokens.store(prompt, Ordering::Relaxed);
+        }
+        if completion > 0 {
+            completion_tokens.store(completion, Ordering::Relaxed);
+        }
 
         if let Some(transformed) = adapter.transform_sse_line(payload) {
             output.push(format!("data: {transformed}\n\n").into_bytes());
         }
     }
 
-    if output.is_empty() { None } else { Some(Bytes::from(output.concat())) }
+    if output.is_empty() {
+        None
+    } else {
+        Some(Bytes::from(output.concat()))
+    }
 }
 
 fn append_and_parse_sse(
@@ -525,16 +658,30 @@ fn append_and_parse_sse(
 
     while let Some(line_end) = buffer.find('\n') {
         let mut line = buffer.drain(..=line_end).collect::<String>();
-        if line.ends_with('\n') { line.pop(); }
-        if line.ends_with('\r') { line.pop(); }
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        if line.ends_with('\r') {
+            line.pop();
+        }
 
-        let Some(payload) = line.strip_prefix("data: ") else { continue };
-        if payload == "[DONE]" { continue }
+        let Some(payload) = line.strip_prefix("data: ") else {
+            continue;
+        };
+        if payload == "[DONE]" {
+            continue;
+        }
 
-        let Ok(value) = serde_json::from_str::<Value>(payload) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(payload) else {
+            continue;
+        };
         let (prompt, completion) = extract_usage_tokens(&value);
-        if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
-        if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
+        if prompt > 0 {
+            prompt_tokens.store(prompt, Ordering::Relaxed);
+        }
+        if completion > 0 {
+            completion_tokens.store(completion, Ordering::Relaxed);
+        }
     }
 }
 
@@ -552,8 +699,12 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
-    let recovery_secs = state.db.get_settings().ok()
-        .map(|s| s.circuit_recovery_secs as u64).unwrap_or(300);
+    let recovery_secs = state
+        .db
+        .get_settings()
+        .ok()
+        .map(|s| s.circuit_recovery_secs as u64)
+        .unwrap_or(300);
 
     let cb = breakers
         .entry(entry_id.to_string())
@@ -682,15 +833,30 @@ fn log_usage(
     .to_string();
 
     let _ = db.insert_usage_log(
-        log_type, content,
+        log_type,
+        content,
         access_key.map(|ak| ak.id.as_str()),
         access_key.map(|ak| ak.name.as_str()).unwrap_or("auto"),
-        token_name, &entry.id, &entry.channel_id,
+        token_name,
+        &entry.id,
+        &entry.channel_id,
         entry.channel_name.as_deref().unwrap_or("unknown"),
-        &entry.model, requested_model, 0, is_stream,
-        prompt_tokens, completion_tokens, latency_ms,
-        first_token_ms, use_time, status_code, success,
-        "", "default", &other, error_message, None,
+        &entry.model,
+        requested_model,
+        0,
+        is_stream,
+        prompt_tokens,
+        completion_tokens,
+        latency_ms,
+        first_token_ms,
+        use_time,
+        status_code,
+        success,
+        "",
+        "default",
+        &other,
+        error_message,
+        None,
     );
 
     let _ = app_handle.emit("new-usage-log", ());

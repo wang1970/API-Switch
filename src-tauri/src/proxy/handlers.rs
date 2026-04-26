@@ -54,7 +54,8 @@ pub async fn handle_chat_completions(
 
     // Resolve target entries
     let enabled_entries = state.db.get_enabled_entries_for_routing()?;
-    let resolved = router::resolve(&requested_model, &enabled_entries, &state.circuit_breakers).await;
+    let resolved =
+        router::resolve(&requested_model, &enabled_entries, &state.circuit_breakers).await;
 
     if resolved.is_empty() {
         return Err(ProxyError::NoAvailableProvider(requested_model));
@@ -122,10 +123,9 @@ impl IntoResponse for ProxyError {
                 format!("No available provider for model: {model}"),
             ),
             ProxyError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
-            ProxyError::AllProvidersFailed => (
-                StatusCode::BAD_GATEWAY,
-                "All providers failed".to_string(),
-            ),
+            ProxyError::AllProvidersFailed => {
+                (StatusCode::BAD_GATEWAY, "All providers failed".to_string())
+            }
             ProxyError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             ProxyError::Upstream { status, message } => {
                 let code = StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY);

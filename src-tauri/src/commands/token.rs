@@ -19,6 +19,10 @@ pub fn delete_access_key(state: State<'_, AppState>, id: String) -> Result<(), A
 }
 
 #[tauri::command]
-pub fn toggle_access_key(state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), AppError> {
+pub fn toggle_access_key(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), AppError> {
     state.db.toggle_access_key(&id, enabled)
 }

@@ -1,8 +1,8 @@
 use super::circuit_breaker::CircuitBreaker;
 use super::handlers;
 use crate::database::Database;
-use axum::Router;
 use axum::routing::{get, post};
+use axum::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -71,7 +71,10 @@ impl ProxyServer {
 
         let app = Router::new()
             .route("/health", get(handlers::health_check))
-            .route("/v1/chat/completions", post(handlers::handle_chat_completions))
+            .route(
+                "/v1/chat/completions",
+                post(handlers::handle_chat_completions),
+            )
             .route("/v1/models", get(handlers::handle_list_models))
             .layer(cors)
             .with_state(self.state.clone());

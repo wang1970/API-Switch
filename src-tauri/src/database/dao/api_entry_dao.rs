@@ -133,7 +133,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn set_entry_cooldown(&self, id: &str, cooldown_until: Option<i64>) -> Result<(), AppError> {
+    pub fn set_entry_cooldown(
+        &self,
+        id: &str,
+        cooldown_until: Option<i64>,
+    ) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
         conn.execute(

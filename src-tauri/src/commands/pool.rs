@@ -1,8 +1,8 @@
+use crate::build_tray_menu;
 use crate::database::ApiEntry;
 use crate::error::AppError;
 use crate::AppState;
 use crate::TRAY_ID;
-use crate::build_tray_menu;
 use serde::Deserialize;
 use tauri::{Manager, State};
 
@@ -19,7 +19,12 @@ pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppErro
 }
 
 #[tauri::command]
-pub fn toggle_entry(app: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), AppError> {
+pub fn toggle_entry(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), AppError> {
     state.db.toggle_entry(&id, enabled)?;
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {

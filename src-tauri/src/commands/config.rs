@@ -17,7 +17,10 @@ struct GithubRelease {
 pub async fn check_update() -> Result<Option<serde_json::Value>, AppError> {
     let current = env!("CARGO_PKG_VERSION");
 
-    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
+    let url = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        GITHUB_REPO
+    );
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()

@@ -100,7 +100,10 @@ mod tests {
 
         let resolved = resolve("auto", &enabled, &breakers).await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["first", "second", "third"]
+        );
     }
 
     #[tokio::test]
@@ -113,7 +116,10 @@ mod tests {
 
         let resolved = resolve("gpt-4o", &enabled, &breakers).await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match", "fallback"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["match", "fallback"]
+        );
     }
 
     #[tokio::test]
