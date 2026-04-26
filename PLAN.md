@@ -216,6 +216,7 @@ Client → POST /v1/chat/completions
 
 ### P1 — 个人使用体验与稳定性
 
+- [ ] **Responses API 支持**: 新增 `/v1/responses` 路由，支持 OpenAI Responses API 格式（GPT-5.5 等新模型需要），包含请求/响应格式转换
 - [ ] **客户端断开精准检测**: 细分 client_gone / runtime cancellation / 其他 drop
 - [ ] **前端统一 Toast 错误提示**: 替代零散 `alert()` 和静默失败
 
