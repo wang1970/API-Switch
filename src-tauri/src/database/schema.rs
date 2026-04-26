@@ -138,6 +138,8 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("locale", "zh"),
         ("theme", "light"),
         ("show_guide", "1"),
+        ("autostart", "0"),
+        ("start_minimized", "0"),
     ];
 
     for (key, value) in defaults {

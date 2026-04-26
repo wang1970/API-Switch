@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Layers,
   Route,
@@ -9,6 +10,7 @@ import {
   Settings,
   Power,
   ExternalLink,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,15 +27,16 @@ import { useQuery } from "@tanstack/react-query";
 import { getSettings, updateSettings, checkUpdate } from "@/lib/api";
 
 
-type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings";
+type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings" | "guide";
 
-const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string }[] = [
+const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string; external?: string }[] = [
   { key: "apiPool", icon: Layers, labelKey: "nav.apiPool" },
   { key: "channels", icon: Route, labelKey: "nav.channels" },
   { key: "tokens", icon: KeyRound, labelKey: "nav.tokens" },
   { key: "logs", icon: FileText, labelKey: "nav.logs" },
   { key: "dashboard", icon: BarChart3, labelKey: "nav.dashboard" },
   { key: "settings", icon: Settings, labelKey: "nav.settings" },
+  { key: "guide", icon: BookOpen, labelKey: "nav.guide", external: "https://github.com/wang1970/API-Switch/blob/master/GUIDE.md" },
 ];
 
 export default function App() {
@@ -151,7 +154,7 @@ export default function App() {
         {/* Navigation */}
         <ScrollArea className="flex-1 px-2 py-2">
           <nav className="flex flex-col gap-1">
-            {NAV_ITEMS.map(({ key, icon: Icon, labelKey }) => (
+            {NAV_ITEMS.map(({ key, icon: Icon, labelKey, external }) => (
               <Button
                 key={key}
                 variant={currentPage === key ? "secondary" : "ghost"}
@@ -159,7 +162,13 @@ export default function App() {
                   "justify-start gap-2 px-3",
                   currentPage === key && "bg-sidebar-accent text-sidebar-accent-foreground"
                 )}
-                onClick={() => setCurrentPage(key)}
+                onClick={() => {
+                  if (external) {
+                    openUrl(external);
+                  } else {
+                    setCurrentPage(key);
+                  }
+                }}
               >
                 <Icon className="h-4 w-4" />
                 {t(labelKey)}

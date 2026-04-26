@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { getProxyStatus } from "@/lib/api";
+import { testChat } from "@/lib/api";
 import { Send, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,18 +33,14 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [port, setPort] = useState(9090);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (open && entry) {
       setMessages([]);
       setInput("");
       setError(null);
-      getProxyStatus().then((status) => {
-        if (status?.port) setPort(status.port);
-      });
     }
   }, [open, entry]);
 
@@ -55,7 +51,7 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
   }, [messages]);
 
   useEffect(() => {
-    return () => { abortRef.current?.abort(); };
+    return () => { abortRef.current = true; };
   }, []);
 
   const sendMessage = useCallback(async () => {
@@ -68,63 +64,39 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
     setMessages(newMessages);
     setInput("");
     setLoading(true);
-
-    const abortController = new AbortController();
-    abortRef.current = abortController;
+    abortRef.current = false;
 
     const start = performance.now();
-    let connect_ms = 0;
-    let think_ms = 0;
-    let prompt_tokens = 0;
-    let completion_tokens = 0;
 
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: entry.model,
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          stream: false,
-        }),
-        signal: abortController.signal,
-      });
+      const result = await testChat(
+        entry.id,
+        newMessages.map((m) => ({ role: m.role, content: m.content }))
+      );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
+      if (abortRef.current) return;
 
-      const data = await response.json();
-      connect_ms = Math.round(performance.now() - start);
-      const content = data.choices?.[0]?.message?.content || "";
-      prompt_tokens = data.usage?.prompt_tokens || 0;
-      completion_tokens = data.usage?.completion_tokens || 0;
+      const connect_ms = Math.round(performance.now() - start);
 
-      if (!abortController.signal.aborted) {
-        setMessages([...newMessages, {
-          role: "assistant",
-          content,
-          connect_ms,
-          think_ms: 0,
-          usage: prompt_tokens + completion_tokens > 0
-            ? { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens }
-            : undefined,
-        }]);
-      }
+      setMessages([...newMessages, {
+        role: "assistant",
+        content: result.content,
+        connect_ms,
+        think_ms: 0,
+        usage: result.usage
+          ? { prompt_tokens: result.usage.prompt_tokens, completion_tokens: result.usage.completion_tokens, total_tokens: result.usage.total_tokens }
+          : undefined,
+      }]);
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      if (!abortController.signal.aborted) {
-        setError(err instanceof Error ? err.message : String(err));
-        setMessages(newMessages);
-      }
+      if (abortRef.current) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setMessages(newMessages);
     } finally {
-      if (!abortController.signal.aborted) {
+      if (!abortRef.current) {
         setLoading(false);
       }
-      abortRef.current = null;
     }
-  }, [input, loading, entry, messages, port]);
+  }, [input, loading, entry, messages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -134,14 +106,14 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
   };
 
   const clearMessages = () => {
-    abortRef.current?.abort();
+    abortRef.current = true;
     setMessages([]);
     setError(null);
     setLoading(false);
   };
 
   const handleClose = (v: boolean) => {
-    abortRef.current?.abort();
+    abortRef.current = true;
     onOpenChange(v);
   };
 

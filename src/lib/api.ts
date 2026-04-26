@@ -174,3 +174,22 @@ export async function checkUpdate(): Promise<UpdateInfo | null> {
 export async function refreshTrayMenu(): Promise<void> {
   return invoke("refresh_tray_menu");
 }
+
+// --- Test Chat ---
+
+export interface TestChatResponse {
+  content: string;
+  latency_ms: number;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+export async function testChat(
+  entryId: string,
+  messages: { role: string; content: string }[]
+): Promise<TestChatResponse> {
+  return invoke("test_chat", { entryId, messages });
+}

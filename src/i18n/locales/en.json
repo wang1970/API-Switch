@@ -8,7 +8,8 @@
     "logs": "Usage Logs",
     "tokens": "Access Keys",
     "dashboard": "Dashboard",
-    "settings": "Settings"
+    "settings": "Settings",
+    "guide": "Guide"
   },
   "apiPool": {
     "title": "API Management",
@@ -171,6 +172,10 @@
       "themeLight": "Light",
       "themeDark": "Dark",
       "themeSystem": "System"
+    },
+    "guide": {
+      "title": "Usage Guide",
+      "link": "View usage guide and configurations"
     }
   },
   "common": {

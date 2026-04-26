@@ -105,7 +105,7 @@ function SortablePoolEntryCard({
         <div
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
+          className="cursor-pointer text-muted-foreground hover:text-foreground"
         >
           <GripVertical className="h-3.5 w-3.5 shrink-0" />
         </div>
@@ -146,13 +146,17 @@ export function ApiPoolPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
 
-  // Listen for tray priority changes to refresh the list
+  // Listen for entries changes (cooldown, tray priority, etc.)
   useEffect(() => {
-    const unlisten = listen("tray-priority-changed", () => {
+    const unlisten1 = listen("tray-priority-changed", () => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+    });
+    const unlisten2 = listen("entries-changed", () => {
       queryClient.invalidateQueries({ queryKey: ["entries"] });
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten1.then((fn) => fn());
+      unlisten2.then((fn) => fn());
     };
   }, [queryClient]);
 

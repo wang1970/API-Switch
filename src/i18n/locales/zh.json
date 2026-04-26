@@ -8,7 +8,8 @@
     "logs": "使用日志",
     "tokens": "令牌管理",
     "dashboard": "数据看板",
-    "settings": "系统设置"
+    "settings": "系统设置",
+    "guide": "使用指南"
   },
   "apiPool": {
     "title": "API 管理",
@@ -230,6 +231,10 @@
       "themeLight": "浅色",
       "themeDark": "深色",
       "themeSystem": "跟随系统"
+    },
+    "guide": {
+      "title": "使用指南",
+      "link": "查看使用指南与常见配置"
     }
   },
   "common": {

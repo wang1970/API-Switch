@@ -2,7 +2,6 @@ import { useState, Fragment, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { getUsageLogs } from "@/lib/api";
@@ -106,10 +105,12 @@ export function LogPage() {
           <tbody>
             {logs.map((log) => {
               const isExpanded = expandedId === log.id;
-              const hasDetail = log.content || log.error_message || log.other;
               return (
                 <Fragment key={log.id}>
-                  <tr className="border-b hover:bg-muted/30">
+                  <tr
+                    className="border-b hover:bg-muted/30 cursor-pointer"
+                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                  >
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div>{new Date(log.created_at * 1000).toLocaleString()}</div>
                     </td>
@@ -132,22 +133,9 @@ export function LogPage() {
                     <td className="px-3 py-2 text-right">{log.prompt_tokens}</td>
                     <td className="px-3 py-2 text-right">{log.completion_tokens}</td>
                     <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        {hasDetail ? (
-                          <button
-                            type="button"
-                            className="text-muted-foreground hover:text-foreground p-0"
-                            onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                          >
-                            {isExpanded
-                              ? <ChevronDown className="h-3.5 w-3.5" />
-                              : <ChevronRight className="h-3.5 w-3.5" />}
-                          </button>
-                        ) : null}
-                        <span className={log.success ? "text-green-600" : "text-red-500"}>
-                          {log.success ? t("log.success") : t("log.failed")}
-                        </span>
-                      </div>
+                      <span className={log.success ? "text-green-600" : "text-red-500"}>
+                        {log.success ? t("log.success") : t("log.failed")}
+                      </span>
                     </td>
                   </tr>
                   {isExpanded ? (

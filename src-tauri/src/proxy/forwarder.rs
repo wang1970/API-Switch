@@ -346,6 +346,7 @@ fn build_streaming_response(
     let entry_id = entry.id.clone();
     let circuit_breakers = state.circuit_breakers.clone();
     let settings_db = state.db.clone();
+    let entries_app_handle = state.app_handle.clone();
     let success_circuit_breakers = state.circuit_breakers.clone();
 
     // Guard captured by the move closure → lives as long as the stream body
@@ -390,7 +391,7 @@ fn build_streaming_response(
                     504, false, Some("stream idle timeout"),
                     Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
                 );
-                spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
+                spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
             }
             return Poll::Ready(Some(Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -440,7 +441,7 @@ fn build_streaming_response(
                         502, false, Some(error_message.as_str()),
                         Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
                     );
-                    spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
+                    spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
                 }
                 Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
             }
@@ -462,7 +463,7 @@ fn build_streaming_response(
                         status_code, true, None,
                         Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                     );
-                    spawn_record_circuit_success(success_circuit_breakers.clone(), settings_db.clone(), entry_id.clone());
+                    spawn_record_circuit_success(success_circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
                 }
                 Poll::Ready(None)
             }
@@ -538,6 +539,7 @@ fn append_and_parse_sse(
 
 async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     let _ = state.db.set_entry_cooldown(entry_id, None);
+    let _ = state.app_handle.emit("entries-changed", ());
 
     let mut breakers = state.circuit_breakers.write().await;
     let recovery_secs = state.db.get_settings().ok()
@@ -558,6 +560,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         .max(1);
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
+    let _ = state.app_handle.emit("entries-changed", ());
 
     let mut breakers = state.circuit_breakers.write().await;
     let threshold = settings
@@ -580,6 +583,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
 fn spawn_record_circuit_success(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
     db: Arc<Database>,
+    app_handle: tauri::AppHandle,
     entry_id: String,
 ) {
     tokio::spawn(async move {
@@ -590,6 +594,7 @@ fn spawn_record_circuit_success(
             .unwrap_or(300);
 
         let _ = db.set_entry_cooldown(&entry_id, None);
+        let _ = app_handle.emit("entries-changed", ());
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
@@ -603,6 +608,7 @@ fn spawn_record_circuit_success(
 fn spawn_cool_down_entry(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
     db: Arc<Database>,
+    app_handle: tauri::AppHandle,
     entry_id: String,
 ) {
     tokio::spawn(async move {
@@ -619,6 +625,7 @@ fn spawn_cool_down_entry(
 
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
+        let _ = app_handle.emit("entries-changed", ());
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
