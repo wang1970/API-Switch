@@ -1,10 +1,10 @@
 use crate::error::AppError;
-use crate::AppState;
 use crate::proxy::protocol::get_adapter;
+use crate::AppState;
 use serde::{Deserialize, Serialize};
-use tauri::State;
-use std::time::Instant;
 use serde_json::json;
+use std::time::Instant;
+use tauri::State;
 
 #[derive(Debug, Serialize)]
 pub struct TestChatResponse {
@@ -61,7 +61,9 @@ pub async fn test_chat(
 
     // Send request directly to upstream
     let client = reqwest::Client::new();
-    let request = adapter.apply_auth(client.post(&url), &channel.api_key).json(&upstream_body);
+    let request = adapter
+        .apply_auth(client.post(&url), &channel.api_key)
+        .json(&upstream_body);
 
     let response = request
         .send()
@@ -98,9 +100,16 @@ pub async fn test_chat(
     // Extract usage
     let usage = json_body.get("usage").map(|u| TestChatUsage {
         prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-        completion_tokens: u.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
+        completion_tokens: u
+            .get("completion_tokens")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         total_tokens: u.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
     });
 
-    Ok(TestChatResponse { content, latency_ms, usage })
+    Ok(TestChatResponse {
+        content,
+        latency_ms,
+        usage,
+    })
 }

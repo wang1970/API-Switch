@@ -15,22 +15,22 @@ jobs:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: api-switch.exe
-            asset: api-switch-${{ github.ref_name }}-windows-x64.exe
-          - platform: macos-latest
+            package_kind: windows-portable
+          - platform: macos-15-intel
             target: x86_64-apple-darwin
-            artifact: api-switch
-            asset: api-switch-${{ github.ref_name }}-macos-x64
+            package_kind: macos-dmg
+            arch: x64
+            optional: true
           - platform: macos-latest
             target: aarch64-apple-darwin
-            artifact: api-switch
-            asset: api-switch-${{ github.ref_name }}-macos-arm64
+            package_kind: macos-dmg
+            arch: arm64
           - platform: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: api-switch
-            asset: api-switch-${{ github.ref_name }}-linux-x64
+            package_kind: linux-bundles
 
     runs-on: ${{ matrix.platform }}
+    continue-on-error: ${{ matrix.optional || false }}
 
     steps:
       - name: Checkout
@@ -64,22 +64,57 @@ jobs:
           pnpm remove sharp png-to-ico
 
       - name: Build
-        run: pnpm tauri build --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          case "${{ matrix.package_kind }}" in
+            windows-portable)
+              pnpm tauri build --target ${{ matrix.target }} --no-bundle
+              ;;
+            macos-dmg)
+              pnpm tauri build --target ${{ matrix.target }} --bundles dmg
+              ;;
+            linux-bundles)
+              pnpm tauri build --target ${{ matrix.target }} --bundles appimage,deb
+              ;;
+            *)
+              echo "Unknown package kind: ${{ matrix.package_kind }}" >&2
+              exit 1
+              ;;
+          esac
 
-      - name: Prepare artifact (rename)
+      - name: Prepare release assets
         shell: bash
         run: |
           mkdir -p artifact
-          if [ "${{ matrix.asset }}" = "api-switch.exe" ]; then
-            cp src-tauri/target/${{ matrix.target }}/release/api-switch.exe artifact/
-          else
-            cp src-tauri/target/${{ matrix.target }}/release/api-switch artifact/${{ matrix.asset }}
-          fi
+
+          case "${{ matrix.package_kind }}" in
+            windows-portable)
+              cp "src-tauri/target/${{ matrix.target }}/release/api-switch.exe" \
+                "artifact/api-switch-${{ github.ref_name }}-windows-x64.exe"
+              ;;
+            macos-dmg)
+              dmg_path="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+              test -n "$dmg_path"
+              cp "$dmg_path" "artifact/api-switch-${{ github.ref_name }}-macos-${{ matrix.arch }}.dmg"
+              ;;
+            linux-bundles)
+              appimage_path="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+              deb_path="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/deb" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+              test -n "$appimage_path"
+              test -n "$deb_path"
+              cp "$appimage_path" "artifact/api-switch-${{ github.ref_name }}-linux-x64.AppImage"
+              cp "$deb_path" "artifact/api-switch-${{ github.ref_name }}-linux-x64.deb"
+              ;;
+            *)
+              echo "Unknown package kind: ${{ matrix.package_kind }}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
+          name: ${{ matrix.target }}
           path: artifact/*
 
   publish:
@@ -103,14 +138,15 @@ jobs:
           body: |
             ## API Switch ${{ github.ref_name }}
 
-            Portable single-file build. Download for your platform:
+            Download the package for your platform:
 
-            - `api-switch-windows-x64.exe` — Windows
-            - `api-switch-macos-x64` — macOS Intel
-            - `api-switch-macos-arm64` — macOS Apple Silicon
-            - `api-switch-linux-x64` — Linux
+            - `api-switch-${{ github.ref_name }}-windows-x64.exe` — Windows
+            - `api-switch-${{ github.ref_name }}-macos-x64.dmg` — macOS Intel
+            - `api-switch-${{ github.ref_name }}-macos-arm64.dmg` — macOS Apple Silicon
+            - `api-switch-${{ github.ref_name }}-linux-x64.AppImage` — Linux portable bundle
+            - `api-switch-${{ github.ref_name }}-linux-x64.deb` — Debian/Ubuntu package
 
             ### Usage
-            1. Download and run
-            2. Database is auto-created in the same directory
+            1. Download the package for your platform
+            2. App data is auto-created on first launch
             3. Point your client to `http://127.0.0.1:9090`

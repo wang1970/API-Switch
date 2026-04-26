@@ -15,17 +15,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry } from "@/lib/api";
-import type { ApiEntry, Channel, ApiType } from "@/types";
+import type { ApiEntry, Channel } from "@/types";
 import { cn } from "@/lib/utils";
-import { API_TYPE_OPTIONS } from "@/types";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
 import {
   DndContext,
@@ -300,7 +292,22 @@ function AddApiDialog({
   const [modelName, setModelName] = useState("");
   const [displayName, setDisplayName] = useState("");
 
-  const channelOptions = channels.filter((c) => c.enabled);
+  const enabledChannels = channels.filter((c) => c.enabled);
+
+  useEffect(() => {
+    if (!open) {
+      setChannelId("");
+      setModelName("");
+      setDisplayName("");
+      return;
+    }
+
+    if (channelId && channels.some((channel) => channel.id === channelId && channel.enabled)) {
+      return;
+    }
+
+    setChannelId(enabledChannels[0]?.id ?? "");
+  }, [channelId, channels, enabledChannels, open]);
 
   const createMutation = useMutation({
     mutationFn: () => createEntry({
@@ -327,25 +334,29 @@ function AddApiDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <div className="text-sm font-medium">{t("apiPool.channel")}</div>
-            <Select
+            <select
               value={channelId}
-              onValueChange={(value) => {
-                setChannelId(value);
+              onChange={(e) => {
+                setChannelId(e.target.value);
                 setModelName("");
                 setDisplayName("");
               }}
+              className="flex h-12 w-full rounded-md border border-input bg-transparent px-4 py-2 text-sm shadow-sm outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!enabledChannels.length}
             >
-              <SelectTrigger>
-                <SelectValue placeholder={t("apiPool.selectChannel")} />
-              </SelectTrigger>
-              <SelectContent>
-                {channelOptions.map((channel) => (
-                  <SelectItem key={channel.id} value={channel.id}>
-                    {channel.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <option value="" disabled>
+                {enabledChannels.length ? t("apiPool.selectChannel") : t("common.noData")}
+              </option>
+              {channels.map((channel) => (
+                <option key={channel.id} value={channel.id} disabled={!channel.enabled}>
+                  {channel.enabled ? channel.name : `${channel.name} (${t("channel.disabled")})`}
+                </option>
+              ))}
+            </select>
+            {!channels.length && <p className="text-xs text-muted-foreground">{t("apiPool.noChannels")}</p>}
+            {!!channels.length && !enabledChannels.length && (
+              <p className="text-xs text-muted-foreground">{t("apiPool.noEnabledChannels")}</p>
+            )}
           </div>
 
           <div className="space-y-2">

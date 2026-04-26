@@ -21,6 +21,8 @@
     "channel": "渠道",
     "model": "模型",
     "selectChannel": "选择渠道",
+    "noChannels": "当前还没有渠道，请先到渠道管理中添加渠道。",
+    "noEnabledChannels": "当前渠道都已禁用，请先到渠道管理中启用至少一个渠道。",
     "selectModel": "选择模型",
     "modelPlaceholder": "输入模型名称，如 gpt-4o、claude-3.5-sonnet",
     "displayName": "显示名称",

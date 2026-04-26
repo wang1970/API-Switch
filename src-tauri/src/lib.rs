@@ -6,8 +6,8 @@ mod proxy;
 use database::Database;
 use proxy::ProxyServer;
 use std::sync::Arc;
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Emitter, Manager};
-use tauri::menu::{Menu, MenuItem, CheckMenuItem, PredefinedMenuItem};
 
 pub use error::AppError;
 
@@ -56,7 +56,11 @@ pub fn run() {
             });
 
             // Read settings to decide startup behavior
-            let settings = app.state::<AppState>().db.get_settings().unwrap_or_default();
+            let settings = app
+                .state::<AppState>()
+                .db
+                .get_settings()
+                .unwrap_or_default();
 
             // Build tray icon (ref: cc-switch/src/lib.rs)
             let tray_menu = build_tray_menu(app.handle())?;
@@ -135,8 +139,10 @@ pub fn run() {
 }
 
 pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let entries = app.state::<AppState>()
-        .db.get_enabled_entries_for_routing()
+    let entries = app
+        .state::<AppState>()
+        .db
+        .get_enabled_entries_for_routing()
         .unwrap_or_default();
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 
@@ -150,7 +156,15 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
         .enumerate()
         .map(|(i, entry)| {
             let checked = i == 0;
-            CheckMenuItem::with_id(app, &entry.id, &entry.display_name, true, checked, None::<String>).unwrap()
+            CheckMenuItem::with_id(
+                app,
+                &entry.id,
+                &entry.display_name,
+                true,
+                checked,
+                None::<String>,
+            )
+            .unwrap()
         })
         .collect();
 

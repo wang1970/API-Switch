@@ -14,7 +14,10 @@ pub fn refresh_tray_menu(app: tauri::AppHandle) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<ProxyStatus, AppError> {
+pub async fn start_proxy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ProxyStatus, AppError> {
     let settings = state.db.get_settings()?;
     let port = settings.listen_port;
 
@@ -24,7 +27,10 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
     }
 
     let server = crate::proxy::ProxyServer::new(port, state.db.clone(), app);
-    server.start().await.map_err(|e| AppError::Proxy(e.to_string()))?;
+    server
+        .start()
+        .await
+        .map_err(|e| AppError::Proxy(e.to_string()))?;
 
     let status = ProxyStatus {
         running: true,
@@ -44,7 +50,10 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
 pub async fn stop_proxy(state: State<'_, AppState>) -> Result<(), AppError> {
     let mut proxy_guard = state.proxy.write().await;
     if let Some(server) = proxy_guard.take() {
-        server.stop().await.map_err(|e| AppError::Proxy(e.to_string()))?;
+        server
+            .stop()
+            .await
+            .map_err(|e| AppError::Proxy(e.to_string()))?;
     }
     state.db.set_config_value("proxy_enabled", "0")?;
     Ok(())
