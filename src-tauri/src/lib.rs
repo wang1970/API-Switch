@@ -142,6 +142,8 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
         .unwrap_or_default();
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 
+    // 1. Show main window (top of menu)
+    let show_item = MenuItem::with_id(app, "show_main", "Open Main Window", true, None::<String>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
 
     // 2. CheckMenuItems for top 5 entries
@@ -163,7 +165,8 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<String>)?;
 
     // Assemble menu
-    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 2);
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 4);
+    all.push(&show_item as &dyn tauri::menu::IsMenuItem<_>);
     all.push(&separator1 as &dyn tauri::menu::IsMenuItem<_>);
     for item in &check_items {
         all.push(item);
@@ -180,6 +183,12 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     match event_id {
         "quit" => {
             app.exit(0);
+        }
+        "show_main" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
         }
         _ => {
             // Provider entry click — set as top priority
