@@ -104,6 +104,8 @@ pub fn run() {
             commands::channel::delete_channel,
             commands::channel::fetch_models,
             commands::channel::fetch_models_direct,
+            commands::channel::probe_url,
+            commands::channel::detect_api_type,
             commands::channel::select_models,
             commands::pool::list_entries,
             commands::pool::toggle_entry,
@@ -140,8 +142,6 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
         .unwrap_or_default();
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 
-    // 1. Show main window
-    let show_item = MenuItem::with_id(app, "show_main", "Show Main Window", true, None::<String>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
 
     // 2. CheckMenuItems for top 5 entries
@@ -150,7 +150,11 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
         .enumerate()
         .map(|(i, entry)| {
             let checked = i == 0;
-            CheckMenuItem::with_id(app, &entry.id, &entry.display_name, true, checked, None::<String>).unwrap()
+            let label = match &entry.channel_name {
+                Some(ch) => format!("{} / {}", entry.display_name, ch),
+                None => entry.display_name.clone(),
+            };
+            CheckMenuItem::with_id(app, &entry.id, &label, true, checked, None::<String>).unwrap()
         })
         .collect();
 
@@ -159,8 +163,7 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<String>)?;
 
     // Assemble menu
-    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 4);
-    all.push(&show_item as &dyn tauri::menu::IsMenuItem<_>);
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 2);
     all.push(&separator1 as &dyn tauri::menu::IsMenuItem<_>);
     for item in &check_items {
         all.push(item);
@@ -175,12 +178,6 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     log::info!("[tray] menu event: {event_id}");
 
     match event_id {
-        "show_main" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }
         "quit" => {
             app.exit(0);
         }

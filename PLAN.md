@@ -222,6 +222,7 @@ Client → POST /v1/chat/completions
 
 ### P2 — 常用体验增强
 
+- [ ] **模型/渠道测速**: 对指定模型或渠道进行延迟测试（TTFB），排序展示结果，帮助用户选择最优渠道
 - [ ] **CLI 配置片段生成**: PowerShell / bash 环境变量片段复制
 - [ ] **auto 模式实际模型名可见**: 日志和测试对话展示实际命中模型
 - [ ] **响应式布局优化**: 改善小窗口、分屏使用体验
@@ -374,6 +375,19 @@ api-switch/
 ---
 
 ## 14. 变更日志
+
+### 2026-04-27 — 模型拉取两步化 + API 类型自动检测（v0.2.0-dev）
+
+新增 `detect_api_type` 命令，将"拉取模型"拆分为两步流程，降低用户配置门槛。
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **detect_api_type 命令** | 后端依次尝试 OpenAI/Custom → Gemini → Claude(chat probe) → Azure，自动识别 API 类型并返回模型列表 |
+| 2 | **前端两步化 UI** | 模型区新增 "Detect API Type" 按钮（Step 1）+ 检测结果 banner（绿色/黄色），保留 "Fetch" 按钮（Step 2） |
+| 3 | **自动回填** | 检测成功后自动回填 API 类型、填充模型列表，用户只需勾选即可保存 |
+| 4 | **probe_url 增强** | URL 可达性检测同时返回 detected_type 提示 |
+| 5 | **fetch_models_direct** | 新增无状态模型拉取命令，用于保存前的模型预览 |
+| 6 | **protocol 辅助函数** | 新增 `build_models_url_variants`、`try_models_endpoint`、`try_chat_probe`、`dedup_models` |
 
 ### 2026-04-26 — 个人版模型冷却机制（v0.2.0-dev）
 

@@ -193,3 +193,29 @@ export async function testChat(
 ): Promise<TestChatResponse> {
   return invoke("test_chat", { entryId, messages });
 }
+
+// --- API Type Detect ---
+
+export interface DetectApiResult {
+  detected_type: string | null;
+  models: ModelInfo[];
+  message: string;
+}
+
+export async function detectApiType(baseUrl: string, apiKey: string): Promise<DetectApiResult> {
+  return invoke("detect_api_type", { baseUrl, apiKey });
+}
+
+// --- URL Probe ---
+
+export interface ProbeResult {
+  reachable: boolean;
+  status_code: number | null;
+  latency_ms: number;
+  detected_type: string | null;
+  message: string;
+}
+
+export async function probeUrl(url: string): Promise<ProbeResult> {
+  return invoke("probe_url", { url });
+}

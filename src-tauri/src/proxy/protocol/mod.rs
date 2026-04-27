@@ -69,7 +69,7 @@ pub trait ProtocolAdapter {
 
 /// Return the adapter for a given `api_type` string.
 /// Unknown types fall back to the OpenAI adapter (broad compatibility).
-pub fn get_adapter(api_type: &str) -> Box<dyn ProtocolAdapter + Send> {
+pub fn get_adapter(api_type: &str) -> Box<dyn ProtocolAdapter + Send + Sync> {
     match api_type {
         "claude" | "anthropic" => Box::new(claude::ClaudeAdapter),
         "gemini" => Box::new(gemini::GeminiAdapter),

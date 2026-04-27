@@ -37,7 +37,7 @@ pub async fn resolve(
             .collect()
     };
 
-    if model == "auto" {
+    if model.eq_ignore_ascii_case("auto") {
         // AUTO: only enabled + available entries
         return filter_available(enabled_entries);
     }
