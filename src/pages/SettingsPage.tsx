@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { getSettings, updateSettings, getProxyStatus, startProxy, stopProxy } from "@/lib/api";
 import { toast } from "sonner";
 import { DEFAULT_SETTINGS } from "@/types";
@@ -126,14 +127,21 @@ export function SettingsPage() {
               onChange={(e) => update("circuit_failure_threshold", parseInt(e.target.value) || 1)}
             />
           </div>
-          <div className="flex items-center justify-between">
-            <Label>{t("settings.circuit.recovery")}</Label>
-            <Input
-              type="number"
-              className="w-32"
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>{t("settings.circuit.recovery")}</Label>
+              <span className="text-sm text-muted-foreground w-16 text-right">
+                {s.circuit_recovery_secs}s
+              </span>
+            </div>
+            <Slider
+              min={300}
+              max={1800}
+              step={30}
               value={s.circuit_recovery_secs}
-              onChange={(e) => update("circuit_recovery_secs", parseInt(e.target.value) || 300)}
+              onValueChange={(val) => update("circuit_recovery_secs", val)}
             />
+            <p className="text-xs text-muted-foreground">300s – 1800s</p>
           </div>
           <div className="space-y-2">
             <Label>{t("settings.circuit.disableCodes")}</Label>
