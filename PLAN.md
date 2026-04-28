@@ -1,7 +1,7 @@
 # API Switch - 项目计划书
 
 > Personal API Management & Forwarding Center
-> 版本: 0.3.0-dev | 更新日期: 2026-04-28
+> 版本: 0.4.1 | 更新日期: 2026-04-28
 
 ---
 
