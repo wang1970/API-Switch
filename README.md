@@ -69,7 +69,16 @@ Visit [Releases](https://github.com/wang1970/API-Switch/releases) for the latest
 | Anthropic | x-api-key | Claude series models, full format conversion |
 | Google Gemini | Query Parameter | OpenAI-compatible endpoint |
 | Azure OpenAI | api-key Header | Deployment name routing |
-| Custom | Bearer Token | Any OpenAI-compatible third-party service |
+| Custom | Bearer Token | Any OpenAI-compatible third-party service (CODING PLAN, SiliconFlow, etc.) |
+
+### CODING PLAN / Relay Stations
+
+Relay stations (like CODING PLAN) often don't expose a standard `/models` endpoint. API Switch supports these via:
+
+1. Set API type to **Custom**, enter the base URL and API key
+2. Click **Fetch Models** — auto-detection tries multiple protocols and paths as fallback
+3. If the model list API is unavailable, go to **API Management** → **Add Model** to manually enter model names
+4. Built-in model catalog (`models.json`) auto-displays release date, capabilities, context length for any model name
 
 ---
 

@@ -70,7 +70,16 @@ Model: auto（智能匹配）或指定模型名
 | Anthropic | x-api-key | Claude 系列模型，完整格式转换 |
 | Google Gemini | Query Parameter | OpenAI 兼容端点 |
 | Azure OpenAI | api-key Header | Deployment 名称路由 |
-| Custom | Bearer Token | 任何 OpenAI 兼容的第三方服务（中转站等） |
+| Custom | Bearer Token | 任何 OpenAI 兼容的第三方服务（CODING PLAN、硅基流动等） |
+
+### CODING PLAN / 中转站
+
+中转站（如 CODING PLAN）通常不提供标准的 `/models` 接口。API Switch 通过以下方式支持：
+
+1. API 类型选择 **Custom**，填入 Base URL 和 API Key
+2. 点击 **拉取模型** — 自动检测多种协议和路径作为 Fallback
+3. 如果模型列表接口不可用，到 **API 管理** → **添加模型** 手动输入模型名称
+4. 内置模型目录（`models.json`）自动显示任意模型名的发布日期、能力、上下文长度等信息
 
 ---
 
