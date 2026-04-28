@@ -269,6 +269,7 @@ async fn forward_single(
 
     if is_stream {
         request = request.header("Accept", "text/event-stream");
+        request = request.header("Accept-Encoding", "identity");
     }
 
     // Start timer BEFORE sending request — this measures true TTFB
