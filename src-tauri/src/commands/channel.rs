@@ -185,23 +185,61 @@ pub async fn fetch_models_direct(
 pub async fn fetch_models(
     state: State<'_, AppState>,
     channel_id: String,
-) -> Result<Vec<ModelInfo>, AppError> {
+) -> Result<FetchModelsResult, AppError> {
     let channel = state.db.get_channel(&channel_id)?;
 
-    let result = smart_fetch_models(
-        &channel.api_type,
-        &channel.base_url,
-        &channel.api_key,
-        false,
-    ).await?;
+    // Clear stale model metadata before re-detection/fetch.
+    // If detection/fetch fails, the old available/selected models must not remain visible.
+    state.db.update_channel_models(&channel_id, &[], &[])?;
+    state.db.update_channel_response_ms(&channel_id, "")?;
 
-    if channel.api_type != result.detected_type || normalize_base_url(&channel.base_url) != result.corrected_base_url {
-        state.db.update_channel_endpoint(&channel_id, &result.detected_type, &result.corrected_base_url)?;
+    // Step 1: Validate endpoint and get corrected type/url
+    let endpoint_guess = detect_endpoint_guess(&channel.api_type, &channel.base_url, &channel.api_key).await;
+
+    // If validation found a correction, save it immediately (even if fetch later fails)
+    if let Some(ref guess) = endpoint_guess {
+        if channel.api_type != guess.detected_type || normalize_base_url(&channel.base_url) != guess.corrected_base_url {
+            state.db.update_channel_endpoint(&channel_id, &guess.detected_type, &guess.corrected_base_url)?;
+            log::info!("[fetch_models] Endpoint corrected: {} {} → {} {}",
+                channel.api_type, channel.base_url, guess.detected_type, guess.corrected_base_url);
+        }
+    } else {
+        // Validation completely failed — disable channel and bail
+        state.db.update_channel(&channel_id, None, None, None, None, Some(false), None)?;
+        state.db.disable_entries_for_channel(&channel_id)?;
+        return Err(AppError::Network(
+            "Could not validate endpoint. Check URL, API type, and API key.".into(),
+        ));
     }
 
-    state.db.update_channel_models(&channel_id, &result.models, &channel.selected_models)?;
+    let guess = endpoint_guess.unwrap();
 
-    Ok(result.models)
+    // Step 2: Fetch models using validated type/url, with fallback
+    let result = match fetch_models_with_fallback(
+        &guess.detected_type,
+        &guess.corrected_base_url,
+        &channel.api_key,
+    ).await {
+        Ok((_models, _actual_type, _actual_base_url)) => {
+            let count = _models.len();
+            FetchModelsResult {
+                detected_type: guess.detected_type.clone(),
+                corrected_base_url: guess.corrected_base_url.clone(),
+                models: _models,
+                message: format!("Detected: {} ({count} models)", guess.detected_type),
+            }
+        }
+        Err(err) => {
+            // Validation passed but model fetch failed — disable channel
+            state.db.update_channel(&channel_id, None, None, None, None, Some(false), None)?;
+            state.db.disable_entries_for_channel(&channel_id)?;
+            return Err(err);
+        }
+    };
+
+    state.db.update_channel_models(&channel_id, &result.models, &[])?;
+
+    Ok(result)
 }
 
 async fn smart_fetch_models(
@@ -220,6 +258,12 @@ async fn smart_fetch_models(
     } else {
         detect_endpoint_guess(api_type, &base_url, api_key).await
     };
+
+    if !verified && endpoint_guess.is_none() {
+        return Err(AppError::Network(
+            "Could not validate endpoint. HTTP 200 model list is required.".into(),
+        ));
+    }
 
     let fetch_seed_type = endpoint_guess
         .as_ref()
@@ -261,50 +305,57 @@ async fn detect_endpoint_guess(
         .build()
         .ok()?;
 
-    let candidates = build_base_url_candidates(&base_url);
-    let try_types = build_try_types(api_type);
+    let original_url = normalize_base_url(&base_url);
+    let base_site = extract_base_site(&original_url).unwrap_or_else(|| original_url.clone());
 
-    for candidate_base_url in candidates {
-        for current_type in &try_types {
-            let adapter = get_adapter(current_type);
-            let urls = build_models_url_variants(adapter.as_ref(), &candidate_base_url, api_key);
-            for url in &urls {
-                match try_models_endpoint(&client, adapter.as_ref(), url, api_key).await {
-                    Ok(models) if !models.is_empty() => {
-                        if !is_authoritative_detection_success(current_type, url) {
-                            continue;
-                        }
-                        let corrected_base_url = canonical_base_url_for_success(current_type, &candidate_base_url, url);
-                        let detected = resolve_detected_type(current_type, &corrected_base_url);
-                        log::info!("[detect_endpoint] OK via {url}, type={detected}, base_url={corrected_base_url}");
-                        return Some(EndpointGuess {
-                            detected_type: detected,
-                            corrected_base_url,
-                        });
-                    }
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
-            if let Some(probe) = try_chat_probe(&client, adapter.as_ref(), &candidate_base_url, api_key, current_type).await {
-                let probe_url = adapter.build_chat_url(
-                    &candidate_base_url,
-                    match *current_type {
-                        "claude" => "claude-3-5-sonnet-20241022",
-                        "gemini" => "gemini-2.0-flash",
-                        _ => "gpt-4o-mini",
-                    },
-                );
-                if !is_authoritative_detection_success(current_type, &probe_url) {
+    // Phase 1: validate user's selected type first.
+    // custom keeps original URL untouched; other types use base site + type-specific URL rules.
+    let phase1_base_url = if api_type == "custom" { &original_url } else { &base_site };
+    if let Some(guess) = detect_type_with_base_url(&client, api_type, phase1_base_url, api_key, true).await {
+        return Some(guess);
+    }
+
+    // Phase 2: correction flow, fixed priority order.
+    // custom receives original URL; all other types receive base site + their own URL rules.
+    for current_type in ["custom", "openai", "claude", "gemini", "azure"] {
+        let candidate_base_url = if current_type == "custom" { &original_url } else { &base_site };
+        if let Some(guess) = detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false).await {
+            return Some(guess);
+        }
+    }
+
+    None
+}
+
+async fn detect_type_with_base_url(
+    client: &reqwest::Client,
+    api_type: &str,
+    base_url: &str,
+    api_key: &str,
+    respect_selected_type: bool,
+) -> Option<EndpointGuess> {
+    let adapter = get_adapter(api_type);
+    let urls = build_models_url_variants(adapter.as_ref(), base_url, api_key);
+    for url in &urls {
+        match try_models_endpoint(client, adapter.as_ref(), url, api_key).await {
+            Ok(models) if !models.is_empty() => {
+                if !is_authoritative_detection_success(api_type, url) {
                     continue;
                 }
-                let detected = resolve_detected_type(current_type, &probe.corrected_base_url);
-                log::info!("[detect_endpoint] Chat probe OK, type={detected}, base_url={}", probe.corrected_base_url);
+                let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
+                let detected_type = if respect_selected_type {
+                    api_type.to_string()
+                } else {
+                    resolve_detected_type(api_type, &corrected_base_url)
+                };
+                log::info!("[detect_endpoint] OK via {url}, type={detected_type}, base_url={corrected_base_url}");
                 return Some(EndpointGuess {
-                    detected_type: detected,
-                    corrected_base_url: probe.corrected_base_url,
+                    detected_type,
+                    corrected_base_url,
                 });
             }
+            Ok(_) => {}
+            Err(_) => {}
         }
     }
 
@@ -342,12 +393,6 @@ async fn fetch_models_with_fallback(
                     Err(e) => { last_err = e; }
                 }
             }
-
-            if let Some(probe) = try_chat_probe(&client, adapter.as_ref(), &candidate_base_url, api_key, current_type).await {
-                let models = dedup_models(probe.models);
-                log::info!("[fetch_models] Chat probe OK, type={current_type}, base_url={} ({} models)", probe.corrected_base_url, models.len());
-                return Ok((models, current_type, probe.corrected_base_url));
-            }
         }
     }
 
@@ -367,10 +412,11 @@ fn build_try_types(preferred_type: &str) -> Vec<&'static str> {
         _ => "custom",
     };
     let mut v = Vec::new();
-    for t in [normalized, "openai", "custom", "gemini", "claude", "azure"] {
-        let actual = if t == "openai" && normalized == "custom" { "custom" } else { t };
-        if seen.insert(actual) {
-            v.push(actual);
+    // Fetch models with the validated type first, then use the same general priority
+    // as endpoint correction: custom -> openai -> claude -> gemini -> azure.
+    for t in [normalized, "custom", "openai", "claude", "gemini", "azure"] {
+        if seen.insert(t) {
+            v.push(t);
         }
     }
     v
@@ -411,36 +457,69 @@ fn build_base_url_candidates(base_url: &str) -> Vec<String> {
         }
     }
 
+    // Extract base site (scheme + host) as final fallback candidate
+    if let Some(scheme_end) = normalized.find("://") {
+        let after_scheme = &normalized[scheme_end + 3..];
+        if let Some(slash) = after_scheme.find('/') {
+            let base_site = format!("{}://{}", &normalized[..scheme_end], &after_scheme[..slash]);
+            if seen.insert(base_site.clone()) {
+                candidates.push(base_site);
+            }
+        }
+    }
+
     candidates
+}
+
+fn extract_base_site(base_url: &str) -> Option<String> {
+    let normalized = normalize_base_url(base_url);
+    let scheme_end = normalized.find("://")?;
+    let after_scheme = &normalized[scheme_end + 3..];
+    if let Some(slash) = after_scheme.find('/') {
+        Some(format!("{}://{}", &normalized[..scheme_end], &after_scheme[..slash]))
+    } else {
+        Some(normalized)
+    }
 }
 
 fn canonical_base_url_for_success(api_type: &str, fallback_base_url: &str, success_url: &str) -> String {
     let success = success_url.trim();
+    let success_lower = success.to_ascii_lowercase();
 
     if api_type == "gemini" {
-        if let Some((base, _)) = success.split_once("/v1beta/openai/") {
+        if let Some(idx) = success_lower.find("/v1beta/openai/") {
+            let base = &success[..idx];
             return base.trim_end_matches('/').to_string();
         }
     }
 
     if api_type == "claude" {
-        if let Some((base, _)) = success.split_once("/v1/") {
+        if let Some(idx) = success_lower.find("/v1/") {
+            let base = &success[..idx];
             return base.trim_end_matches('/').to_string();
         }
     }
 
     if api_type == "azure" {
-        if let Some((base, _)) = success.split_once("/openai/deployments") {
+        if let Some(idx) = success_lower.find("/openai/deployments") {
+            let base = &success[..idx];
             return base.trim_end_matches('/').to_string();
         }
     }
 
-    if api_type == "openai" || api_type == "custom" {
-        if let Some(stripped) = success.strip_suffix("/models") {
-            return stripped.trim_end_matches('/').to_string();
+    if api_type == "openai" {
+        if let Some(idx) = success_lower.find("/v1/") {
+            let base = &success[..idx];
+            return base.trim_end_matches('/').to_string();
         }
-        if let Some(stripped) = success.strip_suffix("/chat/completions") {
-            return stripped.trim_end_matches('/').to_string();
+    }
+
+    if api_type == "custom" {
+        for suffix in ["/models", "/chat/completions"] {
+            if success_lower.ends_with(suffix) {
+                let stripped = &success[..success.len() - suffix.len()];
+                return stripped.trim_end_matches('/').to_string();
+            }
         }
     }
 
@@ -449,6 +528,7 @@ fn canonical_base_url_for_success(api_type: &str, fallback_base_url: &str, succe
 
 fn trim_known_api_suffix(base_url: &str) -> String {
     let base = base_url.trim_end_matches('/');
+    let lower = base.to_ascii_lowercase();
     let suffixes = [
         "/v1/chat/completions",
         "/chat/completions",
@@ -460,7 +540,8 @@ fn trim_known_api_suffix(base_url: &str) -> String {
         "/openai/deployments",
     ];
     for suffix in suffixes {
-        if let Some(stripped) = base.strip_suffix(suffix) {
+        if lower.ends_with(suffix) {
+            let stripped = &base[..base.len() - suffix.len()];
             return stripped.trim_end_matches('/').to_string();
         }
     }
@@ -468,11 +549,8 @@ fn trim_known_api_suffix(base_url: &str) -> String {
 }
 
 fn resolve_detected_type(detected: &str, base_url: &str) -> String {
-    if detected == "openai" && !base_url.contains("api.openai.com") {
-        "custom".into()
-    } else {
-        detected.into()
-    }
+    let _ = base_url;
+    detected.into()
 }
 
 #[tauri::command]
@@ -501,7 +579,7 @@ fn build_models_url_variants(
 ) -> Vec<String> {
     let mut urls = vec![adapter.build_models_url(base_url, api_key)];
     let base = base_url.trim_end_matches('/');
-    for v in &["/models", "/api/models", "/api/v1/models", "/v2/models"] {
+    for v in &["/models", "/v1/models", "/api/models", "/api/v1/models", "/v2/models"] {
         let u = format!("{base}{v}");
         if !urls.contains(&u) { urls.push(u); }
     }
@@ -518,12 +596,7 @@ async fn try_models_endpoint(
     let resp = adapter.apply_auth(client.get(url), api_key)
         .send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status();
-    if !status.is_success() {
-        // Try to extract model list from error body (some APIs include it)
-        let body = resp.text().await.unwrap_or_default();
-        if let Some(m) = extract_models_from_json(&body) {
-            return Ok(m);
-        }
+    if status != reqwest::StatusCode::OK {
         return Err(format!("HTTP {status}"));
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| format!("{e}"))?;

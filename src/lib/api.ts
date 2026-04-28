@@ -41,7 +41,7 @@ export async function deleteChannel(id: string): Promise<void> {
   return invoke("delete_channel", { id });
 }
 
-export async function fetchModels(channelId: string): Promise<ModelInfo[]> {
+export async function fetchModels(channelId: string): Promise<FetchModelsResult> {
   return invoke("fetch_models", { channelId });
 }
 

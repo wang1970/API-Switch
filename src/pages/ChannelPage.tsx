@@ -360,7 +360,7 @@ function ChannelRow({
             <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
           )}
         </td>
-        <td className="px-4 py-3 whitespace-nowrap">{availableModels.length}</td>
+        <td className="px-4 py-3 whitespace-nowrap">{selectedModels.length} / {availableModels.length}</td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
@@ -500,6 +500,7 @@ function ChannelEditorDialog({
   const [form, setForm] = useState<ChannelFormState>(defaultChannelForm());
   const [showApiKey, setShowApiKey] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelsValidated, setModelsValidated] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -516,6 +517,7 @@ function ChannelEditorDialog({
     setModelSearch("");
     setShowApiKey(false);
     setEndpointVerified(false);
+    setModelsValidated(!!channel && (channel.available_models?.length || 0) > 0);
     if (channel) {
       setForm({
         id: channel.id,
@@ -548,6 +550,9 @@ function ChannelEditorDialog({
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
     if (key === "api_type" || key === "base_url" || key === "api_key") {
       setEndpointVerified(false);
+      setModelsValidated(false);
+      setAvailableModels([]);
+      setSelectedModels([]);
     }
     setForm((prev) => ({ ...prev, [key]: value }));
   };
@@ -563,33 +568,62 @@ function ChannelEditorDialog({
     setAvailableModels([]);
     setSelectedModels([]);
     setEndpointVerified(false);
+    setModelsValidated(false);
   };
 
   const handleFetchModels = async () => {
     setFetchingModels(true);
+    setModelsValidated(false);
+    setAvailableModels([]);
+    setSelectedModels([]);
     try {
       if (form.id) {
-        // Edit mode: use existing channel ID
-        const models = await fetchModels(form.id);
-        setAvailableModels(models);
-        queryClient.invalidateQueries({ queryKey: ["channels"] });
-        const preSelected = await autoSelectModels(models, form.id);
-        setSelectedModels(preSelected);
-      } else {
-        // New mode: smart fetch — auto-detect API type + fetch models in one call
-        const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, endpointVerified);
+        // Edit mode: persist current form first, then fetch models.
+        // This guarantees URL/API type/API key changes are re-calibrated every time.
+        await updateChannel({
+          id: form.id,
+          name: form.name,
+          api_type: form.api_type,
+          base_url: form.base_url,
+          api_key: form.api_key,
+          notes: form.notes,
+          enabled: form.enabled,
+        });
+        const result = await fetchModels(form.id);
         setForm((prev) => ({
           ...prev,
           api_type: result.detected_type as ApiType,
           base_url: result.corrected_base_url || prev.base_url,
         }));
         setEndpointVerified(true);
+        setModelsValidated(true);
+        toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
+        setAvailableModels(result.models);
+        queryClient.invalidateQueries({ queryKey: ["channels"] });
+        const preSelected = await autoSelectModels(result.models, form.id);
+        setSelectedModels(preSelected);
+      } else {
+        // New mode: smart fetch — auto-detect API type + fetch models in one call
+        const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, false);
+        setForm((prev) => ({
+          ...prev,
+          api_type: result.detected_type as ApiType,
+          base_url: result.corrected_base_url || prev.base_url,
+        }));
+        setEndpointVerified(true);
+        setModelsValidated(true);
         toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
         setAvailableModels(result.models);
         const preSelected = await autoSelectModels(result.models, undefined);
         setSelectedModels(preSelected);
       }
     } catch (err) {
+      if (form.id) {
+        try {
+          await selectModels(form.id, []);
+          queryClient.invalidateQueries({ queryKey: ["entries"] });
+        } catch {}
+      }
       toast.error(`${t("channel.models.fetch")} ${t("common.failed")}: ${err}`);
     } finally {
       setFetchingModels(false);
@@ -707,11 +741,22 @@ function ChannelEditorDialog({
     ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
     : availableModels;
 
-  const canSave = form.name && form.base_url && form.api_key;
+  const canFetchModels = form.name && form.base_url && form.api_key;
+  const canSave = !!canFetchModels;
+
+  const handleClose = () => {
+    queryClient.invalidateQueries({ queryKey: ["channels"] });
+    queryClient.invalidateQueries({ queryKey: ["entries"] });
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(v) => {
       if (!v) setSaving(false);
+      if (!v) {
+        queryClient.invalidateQueries({ queryKey: ["channels"] });
+        queryClient.invalidateQueries({ queryKey: ["entries"] });
+      }
       onOpenChange(v);
     }}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
@@ -729,7 +774,7 @@ function ChannelEditorDialog({
 
             <div className="space-y-2">
               <Label>{t("channel.type")}</Label>
-              <Select value={form.api_type} onValueChange={(v) => handleApiTypeChange(v as ApiType)} disabled={isEdit}>
+              <Select value={form.api_type} onValueChange={(v) => handleApiTypeChange(v as ApiType)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -741,9 +786,6 @@ function ChannelEditorDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {isEdit && (
-                <p className="text-xs text-muted-foreground">{t("channel.typeChangeDisabled")}</p>
-              )}
             </div>
 
             <div className="space-y-2">
@@ -805,7 +847,7 @@ function ChannelEditorDialog({
                 variant="outline"
                 className="gap-1.5"
                 onClick={handleFetchModels}
-                disabled={!canSave || fetchingModels}
+                disabled={!canFetchModels || fetchingModels}
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", fetchingModels && "animate-spin")} />
                 {fetchingModels ? t("channel.models.fetching") : t("channel.models.fetch")}
@@ -880,13 +922,13 @@ function ChannelEditorDialog({
         <DialogFooter className="gap-2 sm:gap-2">
           <div className="flex-1" />
 
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" onClick={handleClose} disabled={saving || fetchingModels}>
             {t("common.cancel")}
           </Button>
           <Button
             className="gap-1.5"
             onClick={handleSave}
-            disabled={!canSave || saving}
+            disabled={!canSave || saving || fetchingModels}
           >
             <Save className="h-4 w-4" />
             {saving ? "..." : isEdit ? t("common.save") : t("common.add")}
