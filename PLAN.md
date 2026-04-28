@@ -393,6 +393,21 @@ api-switch/
 | 9 | **选择同步修复** | 渠道保存时无论选择是否为空都调用 `selectModels`，清空选择能正确删除已有条目 |
 | 10 | **API 池缓存刷新** | 渠道保存后同时 invalidate `entries` 和 `channels`，切换页面即时看到数据 |
 
+### 2026-04-28 — 代理核心扫描问题修复（v0.4.2）
+
+代理核心（forwarder / handlers / router / circuit_breaker / server）扫描发现的问题及修复计划。
+
+| # | 优先级 | 模块 | 问题 | 修复方案 |
+|---|--------|------|------|----------|
+| 1 | 🔴 | forwarder | 流式 poll 内同步调用 DB 写日志 | `log_usage` 改为 `tokio::spawn` 异步写入 |
+| 2 | 🔴 | server | 代理 HTTP client 缺 read_timeout / gzip | 添加 `read_timeout(60s)` + `gzip(true)`，connect_timeout 30→15s |
+| 3 | 🔴 | forwarder | 流式错误后 stream drop 可能重复冷却 | `StreamLogGuard::drop` 检查错误类型，upstream_error 跳过重复冷却 |
+| 4 | 🟡 | circuit_breaker | `try_read`/`try_write` 静默失败 | 改为 `read().await` / `write().await` |
+| 5 | 🟡 | handlers | 上游错误信息透传泄露内部细节 | 截断 error_body 长度，移除可能的 API key |
+| 6 | 🟡 | router | failover 不按延迟排序 | 解析 `response_ms` 按延迟排序可用 entry |
+| 7 | 🟢 | handlers | body 限制 10MB | 改为 32MB |
+| 8 | 🟢 | router | 每次请求查 DB | 保留现状，低并发场景可接受 |
+
 ### 2026-04-28 — 渠道保存按钮修复 / gzip 解压支持
 
 | # | 改动项 | 说明 |

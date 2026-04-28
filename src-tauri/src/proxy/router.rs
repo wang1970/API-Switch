@@ -3,12 +3,27 @@ use crate::database::ApiEntry;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+/// Parse response_ms field (stored as seconds string, e.g. "1") to milliseconds.
+/// Returns None if missing or unparseable.
+fn parse_response_ms(entry: &ApiEntry) -> Option<i64> {
+    entry
+        .response_ms
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|secs| (secs * 1000.0) as i64)
+}
+
+/// Sort entries by response time ascending; entries without measurement go last.
+fn sort_by_latency(entries: &mut [ApiEntry]) {
+    entries.sort_by_key(|e| parse_response_ms(e).unwrap_or(i64::MAX));
+}
+
 /// Resolve which entries to try for a given model request.
 /// Returns an ordered list of entries to attempt (failover in order).
 ///
 /// Rules:
-/// - `auto`: use enabled entries only (auto-select pool).
-/// - exact model match: try matched enabled entries first,
+/// - `auto`: use enabled entries only (auto-select pool), sorted by latency.
+/// - exact model match: try matched enabled entries first (sorted by latency),
 ///   then fall back to enabled entries as auto-fallback to prevent disconnection.
 /// - wrong model name: fall back to enabled entries (AUTO behavior).
 ///
@@ -24,7 +39,7 @@ pub async fn resolve(
 
     // Helper: filter out circuit-open entries
     let filter_available = |entries: &[ApiEntry]| -> Vec<ApiEntry> {
-        entries
+        let mut available: Vec<ApiEntry> = entries
             .iter()
             .filter(|e| {
                 if let Some(cb) = breakers.get(&e.id) {
@@ -34,18 +49,20 @@ pub async fn resolve(
                 }
             })
             .cloned()
-            .collect()
+            .collect();
+        sort_by_latency(&mut available);
+        available
     };
 
     if model.eq_ignore_ascii_case("auto") {
-        // AUTO: only enabled + available entries
+        // AUTO: only enabled + available entries, sorted by latency
         return filter_available(enabled_entries);
     }
 
     // Exact model match from ENABLED entries only. This mirrors NEW-API's
     // channel cache, which excludes disabled channels from formal routing.
-    let enabled_available = filter_available(enabled_entries);
-    let matched: Vec<ApiEntry> = enabled_available
+    let mut enabled_available = filter_available(enabled_entries);
+    let mut matched: Vec<ApiEntry> = enabled_available
         .iter()
         .filter(|e| e.model == model)
         .cloned()
@@ -56,8 +73,9 @@ pub async fn resolve(
         return enabled_available;
     }
 
-    // Exact match found: try matched entries first,
-    // then append enabled entries as auto-fallback to prevent disconnection.
+    // Exact match found: try matched entries first (sorted by latency),
+    // then append remaining enabled entries as auto-fallback.
+    sort_by_latency(&mut matched);
     let mut result = matched;
     for entry in &enabled_available {
         if !result.iter().any(|e| e.id == entry.id) {

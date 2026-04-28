@@ -34,7 +34,7 @@ pub async fn handle_chat_completions(
     })?;
 
     // Read request body
-    let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
+    let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
 

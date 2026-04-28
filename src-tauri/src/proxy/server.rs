@@ -41,7 +41,9 @@ impl ProxyServer {
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             app_handle,
             http_client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(15))
+                .read_timeout(Duration::from_secs(120))
+                .gzip(true)
                 .build()
                 .expect("failed to build proxy HTTP client"),
         };

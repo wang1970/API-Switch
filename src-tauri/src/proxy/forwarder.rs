@@ -137,15 +137,25 @@ impl Drop for StreamLogGuard {
                 false,
                 Some("stream dropped before normal completion".to_string()),
             );
-            log_usage(
-                &self.db, &self.app_handle, self.access_key.as_ref(), &self.entry, &self.requested_model,
-                true, self.prompt_tokens.load(Ordering::SeqCst),
-                self.completion_tokens.load(Ordering::SeqCst),
-                self.first_token_ms.load(Ordering::SeqCst),
-                self.start.elapsed().as_millis() as i64,
-                self.status_code, false, Some("stream dropped before normal completion"),
-                Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
-            );
+            let db = self.db.clone();
+            let app_handle = self.app_handle.clone();
+            let access_key = self.access_key.clone();
+            let entry = self.entry.clone();
+            let requested_model = self.requested_model.clone();
+            let prompt_tokens = self.prompt_tokens.load(Ordering::SeqCst);
+            let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
+            let first_token_ms = self.first_token_ms.load(Ordering::SeqCst);
+            let latency_ms = self.start.elapsed().as_millis() as i64;
+            let status_code = self.status_code;
+            tokio::spawn(async move {
+                log_usage(
+                    &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
+                    true, prompt_tokens, completion_tokens,
+                    first_token_ms, latency_ms,
+                    status_code, false, Some("stream dropped before normal completion"),
+                    Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
+                );
+            });
         }
     }
 }
@@ -284,7 +294,8 @@ async fn forward_single(
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();
-        return Err((format!("Upstream error {status}: {error_body}"), status));
+        let sanitized: String = error_body.chars().take(300).collect();
+        return Err((format!("Upstream error {status}: {sanitized}"), status));
     }
 
     let status_code = status as i32;
@@ -394,15 +405,23 @@ fn build_streaming_response(
                     false,
                     Some("stream idle timeout".to_string()),
                 );
-                log_usage(
-                    &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                    true, prompt_tokens.load(Ordering::SeqCst),
-                    completion_tokens.load(Ordering::SeqCst),
-                    first_token_ms.load(Ordering::SeqCst),
-                    start.elapsed().as_millis() as i64,
-                    504, false, Some("stream idle timeout"),
-                    Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
-                );
+                let db2 = db.clone();
+                let ah2 = app_handle.clone();
+                let ak2 = access_key.clone();
+                let e2 = entry.clone();
+                let rm2 = requested_model.clone();
+                let pt = prompt_tokens.load(Ordering::SeqCst);
+                let ct = completion_tokens.load(Ordering::SeqCst);
+                let ft = first_token_ms.load(Ordering::SeqCst);
+                let lat = start.elapsed().as_millis() as i64;
+                tokio::spawn(async move {
+                    log_usage(
+                        &db2, &ah2, ak2.as_ref(), &e2, &rm2,
+                        true, pt, ct, ft, lat,
+                        504, false, Some("stream idle timeout"),
+                        Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
+                    );
+                });
                 spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
             }
             return Poll::Ready(Some(Err(std::io::Error::new(
@@ -444,15 +463,23 @@ fn build_streaming_response(
                         false,
                         Some(error_message.clone()),
                     );
-                    log_usage(
-                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                        true, prompt_tokens.load(Ordering::SeqCst),
-                        completion_tokens.load(Ordering::SeqCst),
-                        first_token_ms.load(Ordering::SeqCst),
-                        start.elapsed().as_millis() as i64,
-                        502, false, Some(error_message.as_str()),
-                        Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
-                    );
+                    let db2 = db.clone();
+                    let ah2 = app_handle.clone();
+                    let ak2 = access_key.clone();
+                    let e2 = entry.clone();
+                    let rm2 = requested_model.clone();
+                    let pt = prompt_tokens.load(Ordering::SeqCst);
+                    let ct = completion_tokens.load(Ordering::SeqCst);
+                    let ft = first_token_ms.load(Ordering::SeqCst);
+                    let lat = start.elapsed().as_millis() as i64;
+                    tokio::spawn(async move {
+                        log_usage(
+                            &db2, &ah2, ak2.as_ref(), &e2, &rm2,
+                            true, pt, ct, ft, lat,
+                            502, false, Some(error_message.as_str()),
+                            Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
+                        );
+                    });
                     spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
                 }
                 Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
@@ -466,16 +493,29 @@ fn build_streaming_response(
                         true,
                         None,
                     );
-                    log_usage(
-                        &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                        true, prompt_tokens.load(Ordering::SeqCst),
-                        completion_tokens.load(Ordering::SeqCst),
-                        first_token_ms.load(Ordering::SeqCst),
-                        start.elapsed().as_millis() as i64,
-                        status_code, true, None,
-                        Some(attempt_path.as_str()), Some(StreamEndReason::Done),
-                    );
-                    spawn_record_circuit_success(success_circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                    let db2 = db.clone();
+                    let ah2 = app_handle.clone();
+                    let ak2 = access_key.clone();
+                    let e2 = entry.clone();
+                    let rm2 = requested_model.clone();
+                    let pt = prompt_tokens.load(Ordering::SeqCst);
+                    let ct = completion_tokens.load(Ordering::SeqCst);
+                    let ft = first_token_ms.load(Ordering::SeqCst);
+                    let lat = start.elapsed().as_millis() as i64;
+                    let sc = status_code;
+                    let scb = success_circuit_breakers.clone();
+                    let eid = entry_id.clone();
+                    let sdb = settings_db.clone();
+                    let eah = entries_app_handle.clone();
+                    tokio::spawn(async move {
+                        log_usage(
+                            &db2, &ah2, ak2.as_ref(), &e2, &rm2,
+                            true, pt, ct, ft, lat,
+                            sc, true, None,
+                            Some(attempt_path.as_str()), Some(StreamEndReason::Done),
+                        );
+                        spawn_record_circuit_success(scb, sdb, eah, eid);
+                    });
                 }
                 Poll::Ready(None)
             }

@@ -30,31 +30,30 @@ impl CircuitBreaker {
     }
 
     pub fn is_available(&self) -> bool {
-        // Check if we should transition from Open to HalfOpen
-        let state = self.state.try_read();
-        match state {
-            Ok(s) => match *s {
-                CircuitState::Closed => true,
-                CircuitState::HalfOpen => true,
-                CircuitState::Open => {
-                    // Check if recovery time has passed
-                    drop(s);
-                    if let Ok(last_open) = self.last_opened_at.try_read() {
-                        if let Some(opened_at) = *last_open {
-                            if opened_at.elapsed().as_secs() >= self.recovery_secs {
-                                // Transition to half-open
-                                drop(last_open);
-                                if let Ok(mut state) = self.state.try_write() {
-                                    *state = CircuitState::HalfOpen;
-                                }
-                                return true;
-                            }
+        let state = match self.state.try_read() {
+            Ok(s) => s,
+            Err(_) => return false, // Lock contention → treat as unavailable
+        };
+        match *state {
+            CircuitState::Closed => true,
+            CircuitState::HalfOpen => true,
+            CircuitState::Open => {
+                drop(state);
+                let last_open = match self.last_opened_at.try_read() {
+                    Ok(guard) => guard,
+                    Err(_) => return false,
+                };
+                if let Some(opened_at) = *last_open {
+                    if opened_at.elapsed().as_secs() >= self.recovery_secs {
+                        drop(last_open);
+                        if let Ok(mut s) = self.state.try_write() {
+                            *s = CircuitState::HalfOpen;
                         }
+                        return true;
                     }
-                    false
                 }
-            },
-            Err(_) => true, // If we can't read, assume available
+                false
+            }
         }
     }
 
