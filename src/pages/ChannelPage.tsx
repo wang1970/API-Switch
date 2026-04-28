@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -36,8 +36,10 @@ import {
   selectModels,
   probeUrl,
   updateChannelResponseMs,
+  listEntries,
 } from "@/lib/api";
 import type { ProbeResult } from "@/lib/api";
+import { getCatalogModel } from "@/lib/modelsCatalog";
 import { API_TYPE_OPTIONS, API_TYPE_DEFAULT_URLS } from "@/types";
 import type { ApiType, Channel, CreateChannelParams, ModelInfo, UpdateChannelParams } from "@/types";
 
@@ -67,15 +69,26 @@ export function ChannelPage() {
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   const { data: channels, isLoading } = useQuery({
     queryKey: ["channels"],
     queryFn: listChannels,
   });
 
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!isLoading && channels && channels.length === 0 && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      setEditingChannel(null);
+      setShowEdit(true);
+    }
+  }, [channels, isLoading]);
+
   const testAllChannels = useCallback(async () => {
     if (!channels) return;
-    const toTest = channels.filter((c) => c.enabled);
+    const toTest = [...channels];
+    const results: Record<string, string> = {};
     for (const ch of toTest) {
       setTestingChannelId(ch.id);
       try {
@@ -85,11 +98,18 @@ export function ChannelPage() {
             ? `${(probe.latency_ms / 1000).toFixed(1)}s`
             : `${probe.latency_ms}ms`;
           await updateChannelResponseMs(ch.id, secs);
+          results[ch.id] = secs;
+        } else {
+          results[ch.id] = "X";
         }
-      } catch {}
+      } catch {
+        results[ch.id] = "X";
+      }
+      setTestResults({ ...results });
       await new Promise((r) => setTimeout(r, 200));
     }
     setTestingChannelId(null);
+    setTestResults({});
     queryClient.invalidateQueries({ queryKey: ["channels"] });
   }, [channels, queryClient]);
 
@@ -173,6 +193,7 @@ export function ChannelPage() {
                     }}
                     onDelete={() => deleteMutation.mutate(channel.id)}
                     testingChannelId={testingChannelId}
+                    testResults={testResults}
                   />
                 ))}
               </tbody>
@@ -203,6 +224,7 @@ function ChannelRow({
   onEdit,
   onDelete,
   testingChannelId,
+  testResults,
 }: {
   channel: Channel;
   expanded: boolean;
@@ -210,6 +232,7 @@ function ChannelRow({
   onEdit: () => void;
   onDelete: () => void;
   testingChannelId?: string | null;
+  testResults?: Record<string, string>;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -314,7 +337,7 @@ function ChannelRow({
           </span>
         </td>
         <td className="px-4 py-3 font-mono text-xs max-w-[320px] truncate">{channel.base_url}</td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 whitespace-nowrap">
           <span className={cn(
             "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
             channel.enabled
@@ -324,16 +347,20 @@ function ChannelRow({
             {channel.enabled ? t("channel.enabled") : t("channel.disabled")}
           </span>
         </td>
-        <td className="px-4 py-3 text-xs text-muted-foreground">
+        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {testingChannelId === channel.id ? (
             <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : testResults?.[channel.id] === "X" ? (
+            <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
+          ) : testResults?.[channel.id] ? (
+            <span className="text-green-600">{testResults[channel.id]}</span>
           ) : channel.response_ms ? (
             <span className="text-green-600">{channel.response_ms}</span>
           ) : (
             <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
           )}
         </td>
-        <td className="px-4 py-3">{availableModels.length}</td>
+        <td className="px-4 py-3 whitespace-nowrap">{availableModels.length}</td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
@@ -546,6 +573,8 @@ function ChannelEditorDialog({
         const models = await fetchModels(form.id);
         setAvailableModels(models);
         queryClient.invalidateQueries({ queryKey: ["channels"] });
+        const preSelected = await autoSelectModels(models, form.id);
+        setSelectedModels(preSelected);
       } else {
         // New mode: smart fetch — auto-detect API type + fetch models in one call
         const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, endpointVerified);
@@ -557,8 +586,9 @@ function ChannelEditorDialog({
         setEndpointVerified(true);
         toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
         setAvailableModels(result.models);
+        const preSelected = await autoSelectModels(result.models, undefined);
+        setSelectedModels(preSelected);
       }
-      setSelectedModels([]);
     } catch (err) {
       toast.error(`${t("channel.models.fetch")} ${t("common.failed")}: ${err}`);
     } finally {
@@ -587,6 +617,42 @@ function ChannelEditorDialog({
   };
 
   const [saving, setSaving] = useState(false);
+
+  const autoSelectModels = useCallback(async (models: ModelInfo[], channelId?: string): Promise<string[]> => {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
+
+    // For existing channels, collect current channel's existing model names
+    let existingModels = new Set<string>();
+    if (channelId) {
+      try {
+        const entries = await listEntries();
+        existingModels = new Set(
+          entries.filter((e) => e.channel_id === channelId).map((e) => e.model.toLowerCase()),
+        );
+      } catch {}
+    }
+
+    const selected = new Set<string>();
+
+    // 1. Select models released within 6 months
+    for (const m of models) {
+      const catalog = getCatalogModel(m.name);
+      if (catalog?.release_date && catalog.release_date >= sixMonthsAgoStr) {
+        selected.add(m.name);
+      }
+    }
+
+    // 2. Select models already in this channel's API pool
+    for (const m of models) {
+      if (existingModels.has(m.name.toLowerCase())) {
+        selected.add(m.name);
+      }
+    }
+
+    return Array.from(selected);
+  }, []);
 
   const handleSave = async () => {
     if (!form.name || !form.base_url || !form.api_key) return;
@@ -624,12 +690,11 @@ function ChannelEditorDialog({
         await updateChannelResponseMs(channelId, secs);
       }
 
-      // 3. Sync selected models to pool (if any)
-      if (selectedModels.length > 0) {
-        await selectModels(channelId, selectedModels);
-      }
+      // 3. Sync selected models to pool (always sync to handle deletions)
+      await selectModels(channelId, selectedModels);
 
       queryClient.invalidateQueries({ queryKey: ["channels"] });
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
       onOpenChange(false);
     } catch (err) {
       toast.error(`${t("common.save")} ${t("common.failed")}: ${err}`);

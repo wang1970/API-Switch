@@ -111,6 +111,8 @@ pub fn run() {
             commands::pool::toggle_entry,
             commands::pool::reorder_entries,
             commands::pool::create_entry,
+            commands::pool::test_entry_latency,
+            commands::pool::update_entry_response_ms,
             commands::token::list_access_keys,
             commands::token::create_access_key,
             commands::token::delete_access_key,

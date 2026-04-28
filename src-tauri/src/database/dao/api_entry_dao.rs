@@ -24,6 +24,9 @@ pub struct ApiEntry {
     // Model's owned_by from channel_api_type mapping
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub owned_by: Option<String>,
+    // Response time (e.g. "1.2s", "350ms"), persisted from speed tests
+    #[serde(default)]
+    pub response_ms: Option<String>,
 }
 
 fn default_circuit_state() -> String {
@@ -35,7 +38,8 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
-                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type
+                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
+                    e.response_ms
              FROM api_entries e
              LEFT JOIN channels c ON e.channel_id = c.id
              ORDER BY e.sort_index, e.created_at",
@@ -44,6 +48,7 @@ impl Database {
         let entries = stmt
             .query_map([], |row| {
                 let enabled: i32 = row.get(5)?;
+                let response_ms: String = row.get(11).unwrap_or_default();
                 Ok(ApiEntry {
                     id: row.get(0)?,
                     channel_id: row.get(1)?,
@@ -58,6 +63,7 @@ impl Database {
                     channel_name: row.get(9).ok(),
                     channel_api_type: row.get(10).ok(),
                     owned_by: None,
+                    response_ms: if response_ms.is_empty() { None } else { Some(response_ms) },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -97,6 +103,7 @@ impl Database {
             channel_name: None,
             channel_api_type: None,
             owned_by: None,
+            response_ms: None,
         })
     }
 
@@ -182,7 +189,18 @@ impl Database {
 
     pub fn delete_entry(&self, id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
-        conn.execute("DELETE FROM api_entries WHERE id = ?1", [id])?;
+        conn.execute("DELETE FROM api_entries WHERE id = ?1", [id])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_entry_response_ms(&self, id: &str, response_ms: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "UPDATE api_entries SET response_ms = ?1 WHERE id = ?2",
+            rusqlite::params![response_ms, id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -222,6 +240,7 @@ impl Database {
                 channel_name: None,
                 channel_api_type: None,
                 owned_by: None,
+                response_ms: None,
             })
         });
 
@@ -265,7 +284,7 @@ impl Database {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
                     "INSERT INTO api_entries (id, channel_id, model, display_name, sort_index, enabled, created_at, updated_at)
-                      VALUES (?1, ?2, ?3, ?3, ?4, 0, ?5, ?5)",
+                      VALUES (?1, ?2, ?3, ?3, ?4, 1, ?5, ?5)",
                     rusqlite::params![id, channel_id, model, next_sort, now],
                 )?;
                 next_sort += 1;
@@ -290,12 +309,13 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
-                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type
+                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
+                    e.response_ms
              FROM api_entries e
              LEFT JOIN channels c ON e.channel_id = c.id
              WHERE e.enabled = 1 AND c.enabled = 1
                AND (e.cooldown_until IS NULL OR e.cooldown_until <= strftime('%s','now'))
-              ORDER BY e.sort_index, e.created_at",
+               ORDER BY e.sort_index, e.created_at",
         )?;
 
         let entries = stmt
@@ -312,6 +332,7 @@ impl Database {
                             "custom" => Some("custom".to_string()),
                             _ => Some(api_type),
                         });
+                let response_ms: String = row.get(11).unwrap_or_default();
                 Ok(ApiEntry {
                     id: row.get(0)?,
                     channel_id: row.get(1)?,
@@ -326,6 +347,7 @@ impl Database {
                     channel_name: row.get(9).ok(),
                     channel_api_type: row.get(10).ok(),
                     owned_by,
+                    response_ms: if response_ms.is_empty() { None } else { Some(response_ms) },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -339,10 +361,11 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
-                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type
+                    e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
+                    e.response_ms
              FROM api_entries e
              LEFT JOIN channels c ON e.channel_id = c.id
-              ORDER BY e.sort_index, e.created_at",
+               ORDER BY e.sort_index, e.created_at",
         )?;
 
         let entries = stmt
@@ -359,6 +382,7 @@ impl Database {
                             "custom" => Some("custom".to_string()),
                             _ => Some(api_type),
                         });
+                let response_ms: String = row.get(11).unwrap_or_default();
                 Ok(ApiEntry {
                     id: row.get(0)?,
                     channel_id: row.get(1)?,
@@ -373,6 +397,7 @@ impl Database {
                     channel_name: row.get(9).ok(),
                     channel_api_type: row.get(10).ok(),
                     owned_by,
+                    response_ms: if response_ms.is_empty() { None } else { Some(response_ms) },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()

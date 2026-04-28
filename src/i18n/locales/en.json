@@ -16,6 +16,8 @@
     "description": "Manage the final exposed models with channel import and manual fallback entry.",
     "empty": "No API entries yet. Add a channel and select models first.",
     "addApi": "Add API",
+    "addModel": "Add Model",
+    "testAllLatency": "Speed Test",
     "search": "Search by model / display name / channel",
     "cooldownInline": "(cooldown {{time}})",
     "filterChannel": "Filter Channel",

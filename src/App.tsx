@@ -30,14 +30,16 @@ import { getSettings, updateSettings, checkUpdate } from "@/lib/api";
 
 type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings" | "guide";
 
-const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string; external?: string }[] = [
+const GUIDE_BASE = "https://github.com/wang1970/API-Switch/blob/master/";
+
+const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string; externalLang?: Record<string, string> }[] = [
   { key: "apiPool", icon: Layers, labelKey: "nav.apiPool" },
   { key: "channels", icon: Route, labelKey: "nav.channels" },
   { key: "tokens", icon: KeyRound, labelKey: "nav.tokens" },
   { key: "logs", icon: FileText, labelKey: "nav.logs" },
   { key: "dashboard", icon: BarChart3, labelKey: "nav.dashboard" },
   { key: "settings", icon: Settings, labelKey: "nav.settings" },
-  { key: "guide", icon: BookOpen, labelKey: "nav.guide", external: "https://github.com/wang1970/API-Switch/blob/master/GUIDE.md" },
+  { key: "guide", icon: BookOpen, labelKey: "nav.guide", externalLang: { zh: "GUIDE_CN.md", en: "GUIDE.md" } },
 ];
 
 export default function App() {
@@ -158,7 +160,7 @@ export default function App() {
           {/* Navigation */}
           <ScrollArea className="flex-1 px-2 py-2">
             <nav className="flex flex-col gap-1">
-              {NAV_ITEMS.map(({ key, icon: Icon, labelKey, external }) => (
+              {NAV_ITEMS.map(({ key, icon: Icon, labelKey, externalLang }) => (
                 <Button
                   key={key}
                   variant={currentPage === key ? "secondary" : "ghost"}
@@ -167,8 +169,9 @@ export default function App() {
                     currentPage === key && "bg-sidebar-accent text-sidebar-accent-foreground"
                   )}
                   onClick={() => {
-                    if (external) {
-                      openUrl(external);
+                    if (externalLang) {
+                      const lang = i18n.language.startsWith("zh") ? "zh" : "en";
+                      openUrl(GUIDE_BASE + externalLang[lang]);
                     } else {
                       setCurrentPage(key);
                     }

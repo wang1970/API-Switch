@@ -80,6 +80,8 @@ export interface ApiEntry {
   channel_api_type?: ApiType;
   // Model provider (e.g. "openai", "anthropic", "google")
   owned_by?: string;
+  // Response time from speed test (e.g. "1.2s", "350ms")
+  response_ms?: string | null;
 }
 
 export interface CreateEntryParams {

@@ -78,6 +78,14 @@ export async function createEntry(params: CreateEntryParams): Promise<ApiEntry> 
   return invoke("create_entry", { params });
 }
 
+export async function testEntryLatency(entryId: string): Promise<string> {
+  return invoke("test_entry_latency", { entryId });
+}
+
+export async function updateEntryResponseMs(entryId: string, responseMs: string): Promise<void> {
+  return invoke("update_entry_response_ms", { entryId, responseMs });
+}
+
 // --- Access Keys ---
 
 export async function listAccessKeys(): Promise<AccessKey[]> {

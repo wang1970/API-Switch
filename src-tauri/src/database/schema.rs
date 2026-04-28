@@ -174,6 +174,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
 
 fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "cooldown_until", "INTEGER")?;
+    ensure_column(conn, "api_entries", "response_ms", "TEXT DEFAULT ''")?;
     Ok(())
 }
 

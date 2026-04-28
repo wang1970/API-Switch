@@ -1,7 +1,7 @@
 # API Switch - 项目计划书
 
 > Personal API Management & Forwarding Center
-> 版本: 0.2.0-dev | 更新日期: 2026-04-26
+> 版本: 0.3.0-dev | 更新日期: 2026-04-28
 
 ---
 
@@ -99,13 +99,13 @@
 
 | 页面 | 文件 | 功能 |
 |------|------|------|
-| API 管理 | `ApiPoolPage.tsx` | 拖拽排序、启停、状态点（绿/红/灰）、测试对话 |
+| API 管理 | `ApiPoolPage.tsx` | 拖拽排序、启停、状态点（绿/红/灰）、测试对话、一键测速、响应时间显示 |
 | 渠道管理 | `ChannelPage.tsx` | 统一添加/编辑弹窗、模型拉取/选择 |
 | 令牌管理 | `TokenPage.tsx` | 密钥 CRUD + 复制 |
 | 使用日志 | `LogPage.tsx` | 分页、成功/失败筛选、点击行展开详情 |
 | 数据看板 | `DashboardPage.tsx` | 统计卡片 + 4 图表 |
 | 系统设置 | `SettingsPage.tsx` | 代理、安全、冷却、托盘、通用设置 |
-| 使用指南 | 侧边栏菜单项 | 外链 GitHub GUIDE.md |
+| 使用指南 | 侧边栏菜单项 | 按语言切换中/英文 GUIDE（GUIDE_CN.md / GUIDE.md） |
 | 测试对话 | `TestChatDialog.tsx` | 直接调 Tauri 命令请求上游，不走代理 |
 
 ---
@@ -177,7 +177,7 @@ Client → POST /v1/chat/completions
 | 表名 | 用途 | 关键字段 |
 |------|------|----------|
 | `channels` | API 渠道 | id, name, api_type, base_url, api_key, available_models(JSON), selected_models(JSON), enabled |
-| `api_entries` | 路由池条目 | id, channel_id, model, display_name, sort_index, enabled, cooldown_until |
+| `api_entries` | 路由池条目 | id, channel_id, model, display_name, sort_index, enabled, cooldown_until, response_ms |
 | `access_keys` | 访问密钥 | id, name, key(UUID), enabled |
 | `usage_logs` | 请求日志 | 25+ 字段，含 token 统计、延迟、错误信息 |
 | `config` | 全局配置 | KV 存储 |
@@ -223,7 +223,7 @@ Client → POST /v1/chat/completions
 
 ### P2 — 常用体验增强
 
-- [ ] **模型/渠道测速**: 对指定模型或渠道进行延迟测试（TTFB），排序展示结果，帮助用户选择最优渠道
+- [x] **模型/渠道测速**: 对指定模型或渠道进行延迟测试（TTFB），排序展示结果，帮助用户选择最优渠道
 - [ ] **CLI 配置片段生成**: PowerShell / bash 环境变量片段复制
 - [ ] **auto 模式实际模型名可见**: 日志和测试对话展示实际命中模型
 - [ ] **响应式布局优化**: 改善小窗口、分屏使用体验
@@ -368,7 +368,8 @@ api-switch/
 │   │   ├── LogPage.tsx                     # 使用日志
 │   │   └── SettingsPage.tsx                # 系统设置
 │   └── i18n/locales/                       # 中英文翻译
-├── GUIDE.md                                # 使用指南（GitHub 外链）
+├── GUIDE.md                                # 使用指南（英文）
+├── GUIDE_CN.md                             # 使用指南（中文）
 ├── package.json
 └── PLAN.md
 ```
@@ -376,6 +377,21 @@ api-switch/
 ---
 
 ## 14. 变更日志
+
+### 2026-04-28 — API 池一键测速 / 使用指南中英双语 / 渠道智能选模 / 体验优化（v0.3.0-dev）
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **API 池一键测速** | 新增测速按钮，逐个测试所有模型延迟，测试中显示旋转图标，成功显示绿色响应时间，失败显示红色 ✗，测试中列表不跳动 |
+| 2 | **API 池响应时间字段** | `api_entries` 表新增 `response_ms TEXT DEFAULT ''`，兼容迁移自动补齐；新增 `test_entry_latency` 和 `update_entry_response_ms` Tauri 命令 |
+| 3 | **渠道测速体验优化** | 改为测试所有渠道（不限于已启用），使用本地 state 逐个回填结果，避免列表跳动 |
+| 4 | **渠道列表 nowrap** | 状态、响应时间、模型数列添加 `whitespace-nowrap`，防止换行 |
+| 5 | **使用指南中英双语** | `GUIDE.md` → `GUIDE_CN.md`（中文原版），新建英文 `GUIDE.md`；侧边栏按 `i18n.language` 自动切换 |
+| 6 | **渠道空时自动弹窗** | 进入渠道页时若无渠道自动弹出添加对话框，每次进入都触发 |
+| 7 | **模型智能预选** | 拉取模型后自动选中 6 个月内发布的新模型 + 当前渠道已有模型 |
+| 8 | **新增模型默认开启** | `sync_entries_for_channel` 新建条目 `enabled` 从 0 改为 1 |
+| 9 | **选择同步修复** | 渠道保存时无论选择是否为空都调用 `selectModels`，清空选择能正确删除已有条目 |
+| 10 | **API 池缓存刷新** | 渠道保存后同时 invalidate `entries` 和 `channels`，切换页面即时看到数据 |
 
 ### 2026-05-XX — 设置页恢复等待时间改为滑块控件
 

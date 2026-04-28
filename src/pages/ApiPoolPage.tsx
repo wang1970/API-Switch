@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { GripVertical, Plus, MessageSquare } from "lucide-react";
+import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, updateEntryResponseMs } from "@/lib/api";
 import type { ApiEntry, Channel } from "@/types";
 import { cn } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
@@ -142,9 +142,13 @@ function formatCooldownRemaining(cooldownUntil: number | null | undefined) {
 function SortablePoolEntryCard({
   entry,
   onTest,
+  testingEntryId,
+  testResult,
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
+  testingEntryId?: string | null;
+  testResult?: string;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -191,6 +195,17 @@ function SortablePoolEntryCard({
             <span className="font-medium truncate">
               {entry.channel_name || "—"} / {entry.model}
             </span>
+            {testingEntryId === entry.id ? (
+              <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+            ) : testResult === "X" ? (
+              <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+            ) : testResult ? (
+              <span className="text-xs text-green-600 shrink-0">({testResult})</span>
+            ) : entry.response_ms === "X" ? (
+              <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+            ) : entry.response_ms ? (
+              <span className="text-xs text-green-600 shrink-0">({entry.response_ms})</span>
+            ) : null}
             {cooldownRemaining ? (
               <span className="text-xs text-red-500 shrink-0">
                 {t("apiPool.cooldownInline", { time: cooldownRemaining })}
@@ -225,6 +240,8 @@ export function ApiPoolPage() {
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
+  const [testingEntryId, setTestingEntryId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   // Listen for entries changes (cooldown, tray priority, etc.)
   useEffect(() => {
@@ -306,6 +323,27 @@ export function ApiPoolPage() {
     reorderMutation.mutate(mergedOrder);
   };
 
+  const testAllEntries = useCallback(async () => {
+    if (!entries) return;
+    const toTest = [...entries];
+    const results: Record<string, string> = {};
+    for (const entry of toTest) {
+      setTestingEntryId(entry.id);
+      try {
+        const secs = await testEntryLatency(entry.id);
+        results[entry.id] = secs;
+      } catch {
+        await updateEntryResponseMs(entry.id, "X");
+        results[entry.id] = "X";
+      }
+      setTestResults({ ...results });
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    setTestingEntryId(null);
+    setTestResults({});
+    queryClient.invalidateQueries({ queryKey: ["entries"] });
+  }, [entries, queryClient]);
+
   if (isLoading) {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
   }
@@ -317,10 +355,16 @@ export function ApiPoolPage() {
           <h1 className="text-xl font-semibold">{t("apiPool.title")}</h1>
           <p className="text-sm text-muted-foreground mt-1">{t("apiPool.description")}</p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
-          <Plus className="h-4 w-4" />
-          {t("apiPool.addApi")}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={testAllEntries} disabled={testingEntryId !== null}>
+            <RefreshCw className={cn("h-4 w-4", testingEntryId !== null && "animate-spin")} />
+            {t("apiPool.testAllLatency")}
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
+            <Plus className="h-4 w-4" />
+            {t("apiPool.addModel")}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -349,7 +393,7 @@ export function ApiPoolPage() {
               >
                 <div className="flex flex-col gap-3">
                   {filteredEntries.map((entry) => (
-                    <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} />
+                    <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} testingEntryId={testingEntryId} testResult={testResults[entry.id]} />
                   ))}
                 </div>
               </SortableContext>
@@ -401,7 +445,7 @@ function AddApiDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("apiPool.addApi")}</DialogTitle>
+          <DialogTitle>{t("apiPool.addModel")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">

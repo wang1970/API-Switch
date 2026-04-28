@@ -16,6 +16,8 @@
     "description": "统一管理最终对外暴露的模型，支持渠道导入与手动补录",
     "empty": "暂无 API 条目，请先在渠道管理中添加渠道并选择模型",
     "addApi": "添加 API",
+    "addModel": "添加模型",
+    "testAllLatency": "一键测速",
     "search": "搜索模型名 / 显示名 / 渠道",
     "cooldownInline": "(冷却 {{time}})",
     "filterChannel": "筛选渠道",

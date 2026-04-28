@@ -3,7 +3,10 @@ use crate::error::AppError;
 use crate::AppState;
 use crate::TRAY_ID;
 use crate::build_tray_menu;
+use crate::proxy::protocol::get_adapter;
 use serde::Deserialize;
+use serde_json::json;
+use std::time::Instant;
 use tauri::{Manager, State};
 
 #[derive(Deserialize)]
@@ -60,4 +63,78 @@ pub fn create_entry(
         }
     }
     Ok(entry)
+}
+
+#[tauri::command]
+pub async fn test_entry_latency(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<String, AppError> {
+    let db = state.db.clone();
+
+    let entries = db.get_entries_for_routing_all()?;
+    let entry = entries
+        .iter()
+        .find(|e| e.id == entry_id)
+        .ok_or_else(|| AppError::NotFound(format!("Entry {entry_id} not found")))?
+        .clone();
+
+    let channel = db.get_channel(&entry.channel_id)?;
+    let adapter = get_adapter(&channel.api_type);
+    let url = adapter.build_chat_url(&channel.base_url, &entry.model);
+
+    let mut upstream_body = json!({
+        "model": entry.model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": false,
+    });
+    adapter.transform_request(&mut upstream_body, &entry.model);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| AppError::Network(format!("HTTP client: {e}")))?;
+
+    let request = adapter
+        .apply_auth(client.post(&url), &channel.api_key)
+        .json(&upstream_body);
+
+    let start = Instant::now();
+    let response = request
+        .send()
+        .await
+        .map_err(|e| AppError::Network(format!("Request failed: {e}")))?;
+
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    if !response.status().is_success() {
+        return Err(AppError::Proxy(format!(
+            "Upstream error {}: {}",
+            response.status().as_u16(),
+            response.text().await.unwrap_or_default()
+        )));
+    }
+
+    // Consume body to ensure complete response
+    let _ = response.bytes().await;
+
+    let secs = if latency_ms >= 1000 {
+        format!("{:.1}s", latency_ms as f64 / 1000.0)
+    } else {
+        format!("{}ms", latency_ms)
+    };
+
+    db.update_entry_response_ms(&entry_id, &secs)?;
+
+    Ok(secs)
+}
+
+#[tauri::command]
+pub fn update_entry_response_ms(
+    state: State<'_, AppState>,
+    entry_id: String,
+    response_ms: String,
+) -> Result<(), AppError> {
+    state.db.update_entry_response_ms(&entry_id, &response_ms)
 }
