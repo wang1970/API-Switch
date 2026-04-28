@@ -399,6 +399,7 @@ api-switch/
 |---|--------|------|
 | 1 | **渠道新增保存按钮解锁** | 新建渠道时保存按钮不再强制要求先拉取模型，填完名称/URL/API Key 即可保存 |
 | 2 | **gzip 解压支持** | reqwest 启用 `gzip` feature，修复上游返回 gzip 压缩响应时 `error decoding response body` 错误 |
+| 3 | **添加模型弹窗精简** | 移除 AddApiDialog 中模型元信息提示框，减少无效信息干扰 |
 
 ### 2026-05-XX — 设置页恢复等待时间改为滑块控件
 

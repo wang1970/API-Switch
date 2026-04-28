@@ -424,7 +424,6 @@ function AddApiDialog({
   const [displayName, setDisplayName] = useState("");
 
   const channelOptions = channels.filter((c) => c.enabled);
-  const selectedCatalogModel = useMemo(() => getCatalogModel(modelName), [modelName]);
 
   const createMutation = useMutation({
     mutationFn: () => createEntry({
@@ -480,13 +479,6 @@ function AddApiDialog({
               placeholder={t("apiPool.modelPlaceholder")}
             />
           </div>
-
-          {selectedCatalogModel ? (
-            <div className="rounded-md border bg-muted/20 p-3">
-              <div className="text-sm font-medium">{selectedCatalogModel.name || selectedCatalogModel.id}</div>
-              <ModelMetaBlock modelId={modelName} />
-            </div>
-          ) : null}
 
           <div className="space-y-2">
             <div className="text-sm font-medium">{t("apiPool.displayName")}</div>
