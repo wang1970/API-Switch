@@ -130,12 +130,14 @@ struct StreamLogGuard {
 impl Drop for StreamLogGuard {
     fn drop(&mut self) {
         if !self.logged.swap(true, Ordering::SeqCst) {
+            // Client disconnect: upstream was fine (status_code 200), mark as success.
+            // stream_end_reason: dropped distinguishes it from normal completion.
             let attempt_path = attempt_path_with_current(
                 &self.prior_attempts,
                 &self.entry,
                 self.status_code,
-                false,
-                Some("stream dropped before normal completion".to_string()),
+                true,
+                None,
             );
             let db = self.db.clone();
             let app_handle = self.app_handle.clone();
@@ -152,7 +154,7 @@ impl Drop for StreamLogGuard {
                     &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                     true, prompt_tokens, completion_tokens,
                     first_token_ms, latency_ms,
-                    status_code, false, Some("stream dropped before normal completion"),
+                    status_code, true, None,
                     Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
                 );
             });
