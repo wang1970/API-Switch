@@ -46,6 +46,7 @@ pub async fn handle_chat_completions(
         .and_then(|m| m.as_str())
         .unwrap_or("auto")
         .to_string();
+    let requested_model = if requested_model.is_empty() { "auto".to_string() } else { requested_model };
 
     let is_stream = body
         .get("stream")

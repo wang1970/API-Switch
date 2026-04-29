@@ -220,6 +220,32 @@ Client → POST /v1/chat/completions
 - [ ] **客户端断开精准检测**: 细分 client_gone / runtime cancellation / 其他 drop
 - [ ] **前端统一 Toast 错误提示**: 替代零散 `alert()` 和静默失败
 - [ ] **程序放外网**: 打包发布到公网，支持外部访问
+- [ ] **错误冷却策略优化 (个人模式)**:
+    - **问题**: 当前所有非永久禁用错误（401/403/410 除外）都会进入 `cool_down` (默认 5 分钟)，导致对**不可恢复错误**进行无意义的反复重试，浪费用户时间。
+    - **核心思路**: **中间状态不落地**。连续失败计数完全在**内存**中维护，重启归零，无需数据库字段。数据库只存持久状态。
+    - **规则**:
+        1. **任何冷却的错误都计数**（不论 4xx/5xx/网络）。每失败一次，内存计数器 +1。
+        2. **达到阈值**（如 3 次连续失败）→ **永久禁用** (`enabled=false`)，并设 `cooldown_until=now+1day`（24 小时后自动恢复尝试一次）。禁用后**路由完全不可见**（AUTO 和指定模型均跳过）。
+        3. **阈值内**（未达到）：正常冷却（`cooldown_until=now+N秒`），正常路由可见。
+        4. **强制开启**：用户手动 `enabled=true` → 清除计数 + 清除冷却，重新开始计数。
+        5. **成功请求**：清除计数 + 清除冷却。
+    - **补充点**:
+        - **24 小时恢复尝试**: "1Day 冷却" 不是永久禁用，24 小时后 `cooldown_until` 过期，模型自动回到池中尝试一次。如果又失败 → 再禁 1Day。这样用户不手动干预也可能在服务恢复后自动回归。
+        - **AUTO 和指定模型**: 统一通过 `enabled + cooldown_until` 过滤，不区分两种路由模式。
+        - **用户感知**: UI 上不新增"自动禁用"状态点，复用现有灰点 (`!enabled`) + 冷却剩余时间显示。但如果用户看到"已禁用 23h"会困惑，建议在冷却提示文案上区分：`"冷却 30s"` vs `"故障 23h"`。
+        - **重启**: 内存计数清零，但 `cooldown_until` 和 `enabled` 在数据库中持久化，重启后 24 小时冷却依然生效。
+        - **测试对话**: 测试对话（`test_chat`）不走正式路由，应该允许跳过冷却状态直接测试，便于用户验证入口是否恢复。
+    - **牵连点**:
+        - **后端**:
+            - `server.rs`: 新增 `failure_counts: HashMap<String, u32>` 到 `ProxyState`。
+            - `forwarder.rs`: 修改 `cool_down_entry` 计数+阈值判断逻辑；修改 `record_circuit_success` 清除计数；修改 `spawn_cool_down_entry` 同步逻辑。
+            - `pool.rs`: 修改 `toggle_entry` (手动开启时) 清除计数。
+            - `router.rs`: 无需改动（已通过 `enabled + cooldown_until` 过滤）。
+        - **前端**:
+            - `ApiPoolPage.tsx`: 修改冷却文案显示，区分"临时冷却"和"长时间冷却"。
+            - 新增 i18n 文案（如 `"cooldownLong"`）。
+        - **数据库**: **零改动** (复用 `enabled`, `cooldown_until`)。
+    - **收益**: 无意义重试次数从 ∞ 降到 3 次；24h 后自动恢复一次；用户可手动强制开启。
 
 ### P2 — 常用体验增强
 
@@ -393,7 +419,18 @@ api-switch/
 | 9 | **选择同步修复** | 渠道保存时无论选择是否为空都调用 `selectModels`，清空选择能正确删除已有条目 |
 | 10 | **API 池缓存刷新** | 渠道保存后同时 invalidate `entries` 和 `channels`，切换页面即时看到数据 |
 
-### 2026-04-28 — 代理核心扫描问题修复（v0.4.2）
+### 2026-04-29 — 错误冷却策略优化 (个人模式) / 空模型名修复
+
+| # | 改动项 | 说明 |
+|---|--------|------|
+| 1 | **冷却策略改为"连续失败关闭"** | 任何错误都计数，达到阈值（默认 3 次）→ `enabled=false` + 24h 冷却。计数纯内存，重启归零。用户手动开启时清除计数+冷却。 |
+| 2 | **`ProxyState` 新增 `failure_counts`** | `HashMap<String, u32>` 内存计数器，与 `AppState` 共享，Tauri 命令和代理服务器共用。 |
+| 3 | **`forwarder.rs` 冷却逻辑重写** | `cool_down_entry` / `spawn_cool_down_entry` 均改为：计数+1 → 未达阈值则临时冷却 → 已达阈值则永久禁用+24h。 |
+| 4 | **`record_circuit_success` / `spawn_record_circuit_success` 清除计数** | 成功请求时清除内存计数。 |
+| 5 | **`toggle_entry` 手动开启时重置** | 用户手动开启入口时清除 `failure_counts` + `cooldown_until`。 |
+| 6 | **设置页标签语义更新** | "连续失败次数"→"连续失败关闭次数"，"恢复等待时间(秒)"→"冷却恢复时间(秒)"，英文同步。 |
+| 7 | **空模型名 `""` 归一化为 `auto`** | `handlers.rs` + `router.rs` 同时处理，避免空字符串误走指定模型路径。 |
+| 8 | **数据库零改动** | 计数器纯内存，复用 `enabled` / `cooldown_until` 字段。 |
 
 代理核心（forwarder / handlers / router / circuit_breaker / server）扫描发现的问题及修复计划。
 

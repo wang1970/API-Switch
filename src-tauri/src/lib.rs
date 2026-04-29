@@ -16,6 +16,7 @@ pub use error::AppError;
 pub struct AppState {
     pub db: Arc<Database>,
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
+    pub failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
 }
 
 pub(crate) const TRAY_ID: &str = "api-switch-tray";
@@ -33,6 +34,7 @@ pub fn run() {
             let state = AppState {
                 db: Arc::new(db),
                 proxy: Arc::new(tokio::sync::RwLock::new(None)),
+                failure_counts: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             };
             app.manage(state);
 
@@ -43,7 +45,7 @@ pub fn run() {
                 if let Ok(settings) = app_state.db.get_settings() {
                     if settings.proxy_enabled {
                         let port = settings.listen_port;
-                        let server = ProxyServer::new(port, app_state.db.clone(), handle.clone());
+                        let server = ProxyServer::new(port, app_state.db.clone(), handle.clone(), app_state.failure_counts.clone());
                         if let Err(e) = server.start().await {
                             log::error!("Failed to auto-start proxy: {e}");
                         } else {

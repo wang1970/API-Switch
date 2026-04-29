@@ -54,7 +54,7 @@ pub async fn resolve(
         available
     };
 
-    if model.eq_ignore_ascii_case("auto") {
+    if model.is_empty() || model.eq_ignore_ascii_case("auto") {
         // AUTO: only enabled + available entries, sorted by latency
         return filter_available(enabled_entries);
     }

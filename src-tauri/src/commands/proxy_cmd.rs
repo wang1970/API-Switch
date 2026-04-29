@@ -23,7 +23,7 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
         return Err(AppError::Proxy("Proxy already running".to_string()));
     }
 
-    let server = crate::proxy::ProxyServer::new(port, state.db.clone(), app);
+    let server = crate::proxy::ProxyServer::new(port, state.db.clone(), app, state.failure_counts.clone());
     server.start().await.map_err(|e| AppError::Proxy(e.to_string()))?;
 
     let status = ProxyStatus {

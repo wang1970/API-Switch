@@ -378,9 +378,11 @@ fn build_streaming_response(
     let mut ping_interval = Box::pin(sleep(STREAMING_PING_INTERVAL));
     let entry_id = entry.id.clone();
     let circuit_breakers = state.circuit_breakers.clone();
+    let failure_counts = state.failure_counts.clone();
     let settings_db = state.db.clone();
     let entries_app_handle = state.app_handle.clone();
     let success_circuit_breakers = state.circuit_breakers.clone();
+    let success_failure_counts = state.failure_counts.clone();
 
     // Guard captured by the move closure → lives as long as the stream body
     let guard = StreamLogGuard {
@@ -432,7 +434,7 @@ fn build_streaming_response(
                         Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
                     );
                 });
-                spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                spawn_cool_down_entry(circuit_breakers.clone(), failure_counts.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
             }
             return Poll::Ready(Some(Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -490,7 +492,7 @@ fn build_streaming_response(
                             Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
                         );
                     });
-                    spawn_cool_down_entry(circuit_breakers.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                    spawn_cool_down_entry(circuit_breakers.clone(), failure_counts.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
                 }
                 Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
             }
@@ -514,6 +516,7 @@ fn build_streaming_response(
                     let lat = start.elapsed().as_millis() as i64;
                     let sc = status_code;
                     let scb = success_circuit_breakers.clone();
+                    let sfc = success_failure_counts.clone();
                     let eid = entry_id.clone();
                     let sdb = settings_db.clone();
                     let eah = entries_app_handle.clone();
@@ -524,7 +527,7 @@ fn build_streaming_response(
                             sc, true, None,
                             Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                         );
-                        spawn_record_circuit_success(scb, sdb, eah, eid);
+                        spawn_record_circuit_success(scb, sfc, sdb, eah, eid);
                     });
                 }
                 Poll::Ready(None)
@@ -652,6 +655,9 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     let _ = state.app_handle.emit("entries-changed", ());
     refresh_tray(&state.app_handle);
 
+    // Clear failure count
+    state.failure_counts.write().await.remove(entry_id);
+
     let mut breakers = state.circuit_breakers.write().await;
     let recovery_secs = state.db.get_settings().ok()
         .map(|s| s.circuit_recovery_secs as u64).unwrap_or(300);
@@ -669,31 +675,61 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         .map(|s| s.circuit_recovery_secs)
         .unwrap_or(300)
         .max(1);
-    let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
-    let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
-    let _ = state.app_handle.emit("entries-changed", ());
-    refresh_tray(&state.app_handle);
-
-    let mut breakers = state.circuit_breakers.write().await;
     let threshold = settings
         .as_ref()
         .map(|s| s.circuit_failure_threshold as u32)
         .unwrap_or(1)
         .max(1);
-    let recovery_secs = settings
+
+    // Increment failure count in memory
+    let mut counts = state.failure_counts.write().await;
+    let count = counts.entry(entry.id.clone()).or_insert(0);
+    *count += 1;
+    let current_count = *count;
+    drop(counts);
+
+    // If threshold reached, permanently disable the entry (enabled=false) with 24h cooldown
+    if current_count >= threshold {
+        let one_day_later = chrono::Utc::now().timestamp() + 86400; // 24 hours
+        let _ = state.db.set_entry_cooldown(&entry.id, Some(one_day_later));
+        let _ = state.db.toggle_entry(&entry.id, false);
+        let _ = state.app_handle.emit("entries-changed", ());
+        refresh_tray(&state.app_handle);
+
+        // Clear circuit breaker state
+        let mut breakers = state.circuit_breakers.write().await;
+        breakers.remove(&entry.id);
+
+        log::warn!(
+            "Entry {} permanently disabled after {} consecutive failures. Cooldown: 24h.",
+            entry.id,
+            current_count
+        );
+        return;
+    }
+
+    // Otherwise, temporary cooldown
+    let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
+    let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
+    let _ = state.app_handle.emit("entries-changed", ());
+    refresh_tray(&state.app_handle);
+
+    let mut breakers = state.circuit_breakers.write().await;
+    let recovery_secs_u64 = settings
         .as_ref()
         .map(|s| s.circuit_recovery_secs as u64)
         .unwrap_or(300);
 
     let cb = breakers
         .entry(entry.id.clone())
-        .or_insert_with(|| CircuitBreaker::new(recovery_secs));
-    cb.set_recovery_secs(recovery_secs);
+        .or_insert_with(|| CircuitBreaker::new(recovery_secs_u64));
+    cb.set_recovery_secs(recovery_secs_u64);
     cb.record_failure(threshold);
 }
 
 fn spawn_record_circuit_success(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
+    failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     db: Arc<Database>,
     app_handle: tauri::AppHandle,
     entry_id: String,
@@ -709,6 +745,9 @@ fn spawn_record_circuit_success(
         let _ = app_handle.emit("entries-changed", ());
         refresh_tray(&app_handle);
 
+        // Clear failure count
+        failure_counts.write().await.remove(&entry_id);
+
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
             .entry(entry_id)
@@ -720,6 +759,7 @@ fn spawn_record_circuit_success(
 
 fn spawn_cool_down_entry(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
+    failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     db: Arc<Database>,
     app_handle: tauri::AppHandle,
     entry_id: String,
@@ -736,6 +776,33 @@ fn spawn_cool_down_entry(
             .map(|s| s.circuit_recovery_secs as u64)
             .unwrap_or(300);
 
+        // Increment failure count
+        let mut counts = failure_counts.write().await;
+        let count = counts.entry(entry_id.clone()).or_insert(0);
+        *count += 1;
+        let current_count = *count;
+        drop(counts);
+
+        // If threshold reached, permanently disable (enabled=false) with 24h cooldown
+        if current_count >= threshold {
+            let one_day_later = chrono::Utc::now().timestamp() + 86400;
+            let _ = db.set_entry_cooldown(&entry_id, Some(one_day_later));
+            let _ = db.toggle_entry(&entry_id, false);
+            let _ = app_handle.emit("entries-changed", ());
+            refresh_tray(&app_handle);
+
+            let mut breakers = circuit_breakers.write().await;
+            breakers.remove(&entry_id);
+
+            log::warn!(
+                "Entry {} permanently disabled after {} consecutive failures. Cooldown: 24h.",
+                entry_id,
+                current_count
+            );
+            return;
+        }
+
+        // Otherwise, temporary cooldown
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
         let _ = app_handle.emit("entries-changed", ());

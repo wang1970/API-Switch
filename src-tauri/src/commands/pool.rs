@@ -30,6 +30,14 @@ pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppErro
 #[tauri::command]
 pub fn toggle_entry(app: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), AppError> {
     state.db.toggle_entry(&id, enabled)?;
+    // When user manually enables, clear cooldown and failure count for a fresh start
+    if enabled {
+        let _ = state.db.set_entry_cooldown(&id, None);
+        // failure_counts is async RwLock; use try_write to avoid blocking Tauri command
+        if let Ok(mut counts) = state.failure_counts.try_write() {
+            counts.remove(&id);
+        }
+    }
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));

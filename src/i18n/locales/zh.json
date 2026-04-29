@@ -267,8 +267,8 @@
     },
     "circuit": {
       "title": "熔断机制",
-      "threshold": "连续失败次数",
-      "recovery": "恢复等待时间(秒)",
+      "threshold": "连续失败关闭次数",
+      "recovery": "冷却恢复时间(秒)",
       "disableCodes": "自动禁用状态码",
       "disableDesc": "匹配到该状态码时立即返回错误，不重试、不熔断。支持填写单个状态码或范围（含首尾），使用逗号分隔",
       "retryCodes": "自动重试状态码",

@@ -259,8 +259,8 @@
     },
     "circuit": {
       "title": "Circuit Breaker",
-      "threshold": "Consecutive Failures",
-      "recovery": "Recovery Wait (sec)",
+      "threshold": "Failure Disable Threshold",
+      "recovery": "Cooldown Recovery (sec)",
       "disableCodes": "Auto-Disable Status Codes",
       "disableDesc": "Immediately return error without retry or circuit-break. Supports single codes or ranges (inclusive), comma-separated",
       "retryCodes": "Auto-Retry Status Codes",
