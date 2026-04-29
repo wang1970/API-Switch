@@ -242,6 +242,7 @@ export function ApiPoolPage() {
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
   const [testingEntryIds, setTestingEntryIds] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Listen for entries changes (cooldown, tray priority, etc.)
   useEffect(() => {
@@ -324,8 +325,11 @@ export function ApiPoolPage() {
   };
 
   const testAllEntries = useCallback(async () => {
-    if (!entries) return;
+    if (!entries || testProgress) return;
     const results: Record<string, string> = {};
+    let completed = 0;
+    const total = entries.length;
+    setTestProgress({ current: 0, total });
 
     // Group entries by channel for parallel testing across channels
     const grouped = new Map<string, ApiEntry[]>();
@@ -354,6 +358,8 @@ export function ApiPoolPage() {
         } catch {
           results[entry.id] = "X";
         }
+        completed++;
+        setTestProgress({ current: completed, total });
         setTestResults({ ...results });
       }
     };
@@ -364,8 +370,9 @@ export function ApiPoolPage() {
     // Refresh and clear
     setTestingEntryIds(new Set());
     setTestResults({});
+    setTestProgress(null);
     queryClient.invalidateQueries({ queryKey: ["entries"] });
-  }, [entries, queryClient]);
+  }, [entries, queryClient, testProgress]);
 
   if (isLoading) {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
@@ -379,9 +386,9 @@ export function ApiPoolPage() {
           <p className="text-sm text-muted-foreground mt-1">{t("apiPool.description")}</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={testAllEntries} disabled={testingEntryIds.size > 0}>
-            <RefreshCw className={cn("h-4 w-4", testingEntryIds.size > 0 && "animate-spin")} />
-            {t("apiPool.testAllLatency")}
+          <Button size="sm" variant="outline" className="gap-1.5 min-w-[140px]" onClick={testAllEntries} disabled={!!testProgress}>
+            <RefreshCw className={cn("h-4 w-4", testProgress && "animate-spin")} />
+            {testProgress ? `${testProgress.current}/${testProgress.total}` : t("apiPool.testAllLatency")}
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" />
