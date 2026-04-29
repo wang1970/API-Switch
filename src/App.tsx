@@ -25,7 +25,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { useQuery } from "@tanstack/react-query";
-import { getSettings, updateSettings, checkUpdate } from "@/lib/api";
+import { getSettings, updateSettings, checkUpdate, getProxyStatus } from "@/lib/api";
 
 
 type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings" | "guide";
@@ -49,6 +49,12 @@ export default function App() {
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
+  });
+
+  const { data: proxyStatus } = useQuery({
+    queryKey: ["proxyStatus"],
+    queryFn: getProxyStatus,
+    refetchInterval: 2000,
   });
 
   const [guideOpen, setGuideOpen] = useState(false);
@@ -151,8 +157,10 @@ export default function App() {
         <aside className="flex w-56 flex-col border-r border-sidebar-border bg-sidebar-background">
           {/* Logo */}
           <div className="flex items-center gap-2 px-4 py-4">
-            <Power className="h-5 w-5 text-primary" />
-            <span className="text-lg font-semibold">API Switch</span>
+            <Power className={cn("h-5 w-5", proxyStatus?.running ? "text-green-500" : "text-red-500")} />
+            <span className="text-lg font-semibold">
+              {proxyStatus?.running ? `API Switch: ${proxyStatus.port}` : "API Switch"}
+            </span>
           </div>
 
           <Separator />

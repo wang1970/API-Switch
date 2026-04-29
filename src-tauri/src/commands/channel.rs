@@ -559,9 +559,9 @@ pub fn select_models(
     state: State<'_, AppState>,
     channel_id: String,
     model_names: Vec<String>,
+    available_models: Vec<ModelInfo>,
 ) -> Result<(), AppError> {
-    let channel = state.db.get_channel(&channel_id)?;
-    state.db.update_channel_models(&channel_id, &channel.available_models, &model_names)?;
+    state.db.update_channel_models(&channel_id, &available_models, &model_names)?;
     state.db.sync_entries_for_channel(&channel_id, &model_names)?;
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {

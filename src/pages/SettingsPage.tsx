@@ -80,7 +80,8 @@ export function SettingsPage() {
                   queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
                   queryClient.invalidateQueries({ queryKey: ["settings"] });
                 } catch (err) {
-                  toast.error(`${t("settings.proxy.title")} ${t("common.failed")}: ${err}`);
+                  const action = v ? t("settings.proxy.start") : t("settings.proxy.stop");
+                  toast.error(`${action} ${t("common.failed")}: ${err}`, { duration: Infinity });
                 }
               }}
             />

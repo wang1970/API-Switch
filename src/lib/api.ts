@@ -56,8 +56,8 @@ export async function fetchModelsDirect(apiType: string, baseUrl: string, apiKey
   return invoke("fetch_models_direct", { apiType, baseUrl, apiKey, verified });
 }
 
-export async function selectModels(channelId: string, modelNames: string[]): Promise<void> {
-  return invoke("select_models", { channelId, modelNames });
+export async function selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[]): Promise<void> {
+  return invoke("select_models", { channelId, modelNames, availableModels });
 }
 
 // --- API Pool ---
@@ -78,7 +78,12 @@ export async function createEntry(params: CreateEntryParams): Promise<ApiEntry> 
   return invoke("create_entry", { params });
 }
 
-export async function testEntryLatency(entryId: string): Promise<string> {
+export interface TestLatencyResult {
+  status: string;
+  response_ms: string;
+}
+
+export async function testEntryLatency(entryId: string): Promise<TestLatencyResult> {
   return invoke("test_entry_latency", { entryId });
 }
 

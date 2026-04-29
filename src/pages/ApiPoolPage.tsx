@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, updateEntryResponseMs } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency } from "@/lib/api";
 import type { ApiEntry, Channel } from "@/types";
 import { cn } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
@@ -142,12 +142,12 @@ function formatCooldownRemaining(cooldownUntil: number | null | undefined) {
 function SortablePoolEntryCard({
   entry,
   onTest,
-  testingEntryId,
+  testingEntryIds,
   testResult,
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
-  testingEntryId?: string | null;
+  testingEntryIds?: Set<string>;
   testResult?: string;
 }) {
   const { t } = useTranslation();
@@ -195,7 +195,7 @@ function SortablePoolEntryCard({
             <span className="font-medium truncate">
               {entry.channel_name || "—"} / {entry.model}
             </span>
-            {testingEntryId === entry.id ? (
+            {testingEntryIds?.has(entry.id) ? (
               <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
             ) : testResult === "X" ? (
               <XCircle className="h-3 w-3 text-red-500 shrink-0" />
@@ -240,7 +240,7 @@ export function ApiPoolPage() {
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
-  const [testingEntryId, setTestingEntryId] = useState<string | null>(null);
+  const [testingEntryIds, setTestingEntryIds] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   // Listen for entries changes (cooldown, tray priority, etc.)
@@ -325,21 +325,38 @@ export function ApiPoolPage() {
 
   const testAllEntries = useCallback(async () => {
     if (!entries) return;
-    const toTest = [...entries];
     const results: Record<string, string> = {};
-    for (const entry of toTest) {
-      setTestingEntryId(entry.id);
-      try {
-        const secs = await testEntryLatency(entry.id);
-        results[entry.id] = secs;
-      } catch {
-        await updateEntryResponseMs(entry.id, "X");
-        results[entry.id] = "X";
-      }
-      setTestResults({ ...results });
-      await new Promise((r) => setTimeout(r, 200));
+
+    // Group entries by channel for parallel testing across channels
+    const grouped = new Map<string, ApiEntry[]>();
+    for (const entry of entries) {
+      const list = grouped.get(entry.channel_id) || [];
+      list.push(entry);
+      grouped.set(entry.channel_id, list);
     }
-    setTestingEntryId(null);
+
+    // Test one channel sequentially
+    const testChannel = async (channelEntries: ApiEntry[]) => {
+      for (const entry of channelEntries) {
+        setTestingEntryIds((prev) => new Set(prev).add(entry.id));
+        try {
+          const result = await testEntryLatency(entry.id);
+          results[entry.id] = result.response_ms;
+          if (result.status === "cooldown") {
+            results[entry.id] = "X";
+          }
+        } catch {
+          results[entry.id] = "X";
+        }
+        setTestResults({ ...results });
+      }
+    };
+
+    // Run all channels in parallel
+    await Promise.all([...grouped.values()].map(testChannel));
+
+    // Refresh and clear
+    setTestingEntryIds(new Set());
     setTestResults({});
     queryClient.invalidateQueries({ queryKey: ["entries"] });
   }, [entries, queryClient]);
@@ -356,8 +373,8 @@ export function ApiPoolPage() {
           <p className="text-sm text-muted-foreground mt-1">{t("apiPool.description")}</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={testAllEntries} disabled={testingEntryId !== null}>
-            <RefreshCw className={cn("h-4 w-4", testingEntryId !== null && "animate-spin")} />
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={testAllEntries} disabled={testingEntryIds.size > 0}>
+            <RefreshCw className={cn("h-4 w-4", testingEntryIds.size > 0 && "animate-spin")} />
             {t("apiPool.testAllLatency")}
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
@@ -393,7 +410,7 @@ export function ApiPoolPage() {
               >
                 <div className="flex flex-col gap-3">
                   {filteredEntries.map((entry) => (
-                    <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} testingEntryId={testingEntryId} testResult={testResults[entry.id]} />
+                    <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} />
                   ))}
                 </div>
               </SortableContext>

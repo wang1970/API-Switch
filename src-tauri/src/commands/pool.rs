@@ -4,10 +4,16 @@ use crate::AppState;
 use crate::TRAY_ID;
 use crate::build_tray_menu;
 use crate::proxy::protocol::get_adapter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Instant;
 use tauri::{Manager, State};
+
+#[derive(Serialize)]
+pub struct TestResult {
+    pub status: String,
+    pub response_ms: String,
+}
 
 #[derive(Deserialize)]
 pub struct CreateEntryParams {
@@ -69,7 +75,7 @@ pub fn create_entry(
 pub async fn test_entry_latency(
     state: State<'_, AppState>,
     entry_id: String,
-) -> Result<String, AppError> {
+) -> Result<TestResult, AppError> {
     let db = state.db.clone();
 
     let entries = db.get_entries_for_routing_all()?;
@@ -109,25 +115,29 @@ pub async fn test_entry_latency(
     let latency_ms = start.elapsed().as_millis() as u64;
 
     if !response.status().is_success() {
-        return Err(AppError::Proxy(format!(
-            "Upstream error {}: {}",
-            response.status().as_u16(),
-            response.text().await.unwrap_or_default()
-        )));
+        let _error_body = response.text().await.unwrap_or_default();
+        let _ = db.update_entry_response_ms(&entry_id, "X");
+        return Ok(TestResult {
+            status: "cooldown".to_string(),
+            response_ms: "X".to_string(),
+        });
     }
 
     // Consume body to ensure complete response
     let _ = response.bytes().await;
 
-    let secs = if latency_ms >= 1000 {
+    let response_ms = if latency_ms >= 1000 {
         format!("{:.1}s", latency_ms as f64 / 1000.0)
     } else {
         format!("{}ms", latency_ms)
     };
 
-    db.update_entry_response_ms(&entry_id, &secs)?;
+    db.update_entry_response_ms(&entry_id, &response_ms)?;
 
-    Ok(secs)
+    Ok(TestResult {
+        status: "ok".to_string(),
+        response_ms,
+    })
 }
 
 #[tauri::command]

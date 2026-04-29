@@ -272,7 +272,7 @@ function ChannelRow({
   });
 
   const selectMutation = useMutation({
-    mutationFn: (models: string[]) => selectModels(channel.id, models),
+    mutationFn: (models: string[]) => selectModels(channel.id, models, availableModels),
     onMutate: async (newSelected) => {
       await queryClient.cancelQueries({ queryKey: ["channels"] });
       const previous = queryClient.getQueryData<Channel[]>(["channels"]);
@@ -577,53 +577,22 @@ function ChannelEditorDialog({
     setAvailableModels([]);
     setSelectedModels([]);
     try {
-      if (form.id) {
-        // Edit mode: persist current form first, then fetch models.
-        // This guarantees URL/API type/API key changes are re-calibrated every time.
-        await updateChannel({
-          id: form.id,
-          name: form.name,
-          api_type: form.api_type,
-          base_url: form.base_url,
-          api_key: form.api_key,
-          notes: form.notes,
-          enabled: form.enabled,
-        });
-        const result = await fetchModels(form.id);
-        setForm((prev) => ({
-          ...prev,
-          api_type: result.detected_type as ApiType,
-          base_url: result.corrected_base_url || prev.base_url,
-        }));
-        setEndpointVerified(true);
-        setModelsValidated(true);
-        toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
-        setAvailableModels(result.models);
-        queryClient.invalidateQueries({ queryKey: ["channels"] });
-        const preSelected = await autoSelectModels(result.models, form.id);
-        setSelectedModels(preSelected);
-      } else {
-        // New mode: smart fetch — auto-detect API type + fetch models in one call
-        const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, false);
-        setForm((prev) => ({
-          ...prev,
-          api_type: result.detected_type as ApiType,
-          base_url: result.corrected_base_url || prev.base_url,
-        }));
-        setEndpointVerified(true);
-        setModelsValidated(true);
-        toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
-        setAvailableModels(result.models);
-        const preSelected = await autoSelectModels(result.models, undefined);
-        setSelectedModels(preSelected);
-      }
+      // New and edit mode use the same semantics here:
+      // fetch models validates only the current form values and updates the dialog state.
+      // Persisting channel config and selected models happens only when the user clicks Save.
+      const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, false);
+      setForm((prev) => ({
+        ...prev,
+        api_type: result.detected_type as ApiType,
+        base_url: result.corrected_base_url || prev.base_url,
+      }));
+      setEndpointVerified(true);
+      setModelsValidated(true);
+      toast.success(`${t("channel.models.fetch")} → ${result.detected_type.toUpperCase()}`);
+      setAvailableModels(result.models);
+      const preSelected = await autoSelectModels(result.models, form.id);
+      setSelectedModels(preSelected);
     } catch (err) {
-      if (form.id) {
-        try {
-          await selectModels(form.id, []);
-          queryClient.invalidateQueries({ queryKey: ["entries"] });
-        } catch {}
-      }
       toast.error(`${t("channel.models.fetch")} ${t("common.failed")}: ${err}`);
     } finally {
       setFetchingModels(false);
@@ -725,7 +694,7 @@ function ChannelEditorDialog({
       }
 
       // 3. Sync selected models to pool (always sync to handle deletions)
-      await selectModels(channelId, selectedModels);
+      await selectModels(channelId, selectedModels, availableModels);
 
       queryClient.invalidateQueries({ queryKey: ["channels"] });
       queryClient.invalidateQueries({ queryKey: ["entries"] });

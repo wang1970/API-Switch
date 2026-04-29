@@ -103,6 +103,7 @@ mod tests {
             updated_at: 0,
             channel_name: Some(format!("channel-{id}")),
             channel_api_type: Some("openai".to_string()),
+            response_ms: None,
             owned_by: None,
         }
     }

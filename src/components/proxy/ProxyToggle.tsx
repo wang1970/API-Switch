@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { startProxy, stopProxy, getProxyStatus } from "@/lib/api";
+import { toast } from "sonner";
 
 export function ProxyToggle() {
   const { t } = useTranslation();
@@ -16,11 +17,17 @@ export function ProxyToggle() {
   const startMutation = useMutation({
     mutationFn: startProxy,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
+    onError: (err) => {
+      toast.error(`${t("settings.proxy.start")} ${t("common.failed")}: ${err}`, { duration: Infinity });
+    },
   });
 
   const stopMutation = useMutation({
     mutationFn: stopProxy,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
+    onError: (err) => {
+      toast.error(`${t("settings.proxy.stop")} ${t("common.failed")}: ${err}`, { duration: Infinity });
+    },
   });
 
   const running = status?.running ?? false;

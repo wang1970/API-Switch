@@ -159,12 +159,7 @@ export function LogPage() {
                       <div>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">
-                      <div>{requestedModel === "auto" ? `(auto) ${resolvedModel}` : resolvedModel}</div>
-                      {requestedModel && requestedModel !== resolvedModel ? (
-                        <div className="text-muted-foreground mt-0.5">
-                          {t("log.requestedModel")}: {requestedModel}
-                        </div>
-                      ) : null}
+                      <div>{resolvedModel}</div>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div>
