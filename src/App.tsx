@@ -11,6 +11,7 @@ import {
   Power,
   ExternalLink,
   BookOpen,
+  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,12 +24,13 @@ import { TokenPage } from "@/pages/TokenPage";
 import { LogPage } from "@/pages/LogPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { CliPage } from "@/pages/CliPage";
 import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { useQuery } from "@tanstack/react-query";
 import { getSettings, updateSettings, checkUpdate, getProxyStatus } from "@/lib/api";
 
 
-type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "settings" | "guide";
+type Page = "apiPool" | "channels" | "tokens" | "logs" | "dashboard" | "cli" | "settings" | "guide";
 
 const GUIDE_BASE = "https://github.com/wang1970/API-Switch/blob/master/";
 
@@ -38,6 +40,7 @@ const NAV_ITEMS: { key: Page; icon: typeof Layers; labelKey: string; externalLan
   { key: "tokens", icon: KeyRound, labelKey: "nav.tokens" },
   { key: "logs", icon: FileText, labelKey: "nav.logs" },
   { key: "dashboard", icon: BarChart3, labelKey: "nav.dashboard" },
+  { key: "cli", icon: Terminal, labelKey: "nav.cli" },
   { key: "settings", icon: Settings, labelKey: "nav.settings" },
   { key: "guide", icon: BookOpen, labelKey: "nav.guide", externalLang: { zh: "GUIDE_CN.md", en: "GUIDE.md" } },
 ];
@@ -123,6 +126,8 @@ export default function App() {
         return <LogPage />;
       case "dashboard":
         return <DashboardPage />;
+      case "cli":
+        return <CliPage />;
       case "settings":
         return <SettingsPage />;
     }

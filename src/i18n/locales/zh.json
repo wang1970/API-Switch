@@ -8,6 +8,7 @@
     "logs": "使用日志",
     "tokens": "令牌管理",
     "dashboard": "数据看板",
+    "cli": "连接 CLI",
     "settings": "系统设置",
     "guide": "使用指南"
   },
@@ -73,6 +74,8 @@
       "disabled": "已关闭（默认）"
     },
     "deleteConfirm": "确定删除 {{name}}？",
+    "deleteTitle": "删除确认",
+    "deleteDesc": "确定删除 {{name}}？删除后该模型将从 API 管理中移除。",
     "keyWarning": "密钥仅显示一次，请妥善保管",
     "testChat": {
       "title": "测试对话",

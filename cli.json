@@ -1,0 +1,47 @@
+[
+  {
+    "id": "opencode",
+    "name": "OpenCode CLI",
+    "package": "@opencode-ai/cli",
+    "env": {
+      "minimal": [
+        { "key": "ANTHROPIC_API_KEY", "description": "Anthropic API Key" }
+      ],
+      "extended": [
+        { "key": "OPENAI_API_KEY", "description": "OpenAI API Key" },
+        { "key": "PROVIDER", "description": "openai / anthropic", "default": "anthropic" },
+        { "key": "ANTHROPIC_BASE_URL", "description": "自定义 Anthropic 端点" },
+        { "key": "OPENAI_BASE_URL", "description": "自定义 OpenAI 端点" },
+        { "key": "HTTPS_PROXY", "description": "代理地址" }
+      ]
+    }
+  },
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "package": "@anthropic-ai/claude-code",
+    "env": {
+      "minimal": [
+        { "key": "ANTHROPIC_API_KEY", "description": "Anthropic API Key" }
+      ],
+      "extended": [
+        { "key": "ANTHROPIC_BASE_URL", "description": "自定义端点" },
+        { "key": "HTTPS_PROXY", "description": "代理地址" }
+      ]
+    }
+  },
+  {
+    "id": "codex",
+    "name": "Codex CLI",
+    "package": "@openai/codex",
+    "env": {
+      "minimal": [
+        { "key": "OPENAI_API_KEY", "description": "OpenAI API Key（浏览器登录可不填）" }
+      ],
+      "extended": [
+        { "key": "OPENAI_BASE_URL", "description": "自定义端点" },
+        { "key": "HTTPS_PROXY", "description": "代理地址" }
+      ]
+    }
+  }
+]

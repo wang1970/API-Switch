@@ -8,6 +8,7 @@
     "logs": "Usage Logs",
     "tokens": "Access Keys",
     "dashboard": "Dashboard",
+    "cli": "Connect CLI",
     "settings": "Settings",
     "guide": "Guide"
   },
@@ -79,6 +80,8 @@
       "disabled": "Disabled (default)"
     },
     "deleteConfirm": "Delete key {{name}}?",
+    "deleteTitle": "Confirm Delete",
+    "deleteDesc": "Delete {{name}}? This model will be removed from API management.",
     "keyWarning": "The secret key will only be shown once. Keep it safe."
   },
   "channel": {

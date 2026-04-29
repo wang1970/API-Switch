@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle } from "lucide-react";
+import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry } from "@/lib/api";
 import type { ApiEntry, Channel } from "@/types";
 import { cn } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
@@ -142,21 +142,19 @@ function formatCooldownRemaining(cooldownUntil: number | null | undefined) {
 function SortablePoolEntryCard({
   entry,
   onTest,
+  onDelete,
+  onToggleIntent,
   testingEntryIds,
   testResult,
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry) => void;
+  onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   testingEntryIds?: Set<string>;
   testResult?: string;
 }) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-
-  const toggleMutation = useMutation({
-    mutationFn: (enabled: boolean) => toggleEntry(entry.id, enabled),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["entries"] }),
-  });
 
   const {
     attributes,
@@ -222,9 +220,26 @@ function SortablePoolEntryCard({
         >
           <MessageSquare className="h-4 w-4" />
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground hover:text-red-500 touch-none"
+          onClick={() => onDelete(entry)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
         <Switch
           checked={entry.enabled}
-          onCheckedChange={(checked) => toggleMutation.mutate(checked)}
+          onClick={(e) => {
+            e.stopPropagation();
+            const nextEnabled = !entry.enabled;
+            onToggleIntent(entry, nextEnabled, {
+              ctrlKey: e.ctrlKey,
+              shiftKey: e.shiftKey,
+              metaKey: e.metaKey,
+            });
+          }}
+          onCheckedChange={() => {}}
           className="touch-none"
         />
       </CardContent>
@@ -243,6 +258,7 @@ export function ApiPoolPage() {
   const [testingEntryIds, setTestingEntryIds] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
 
   // Listen for entries changes (cooldown, tray priority, etc.)
   useEffect(() => {
@@ -294,10 +310,69 @@ export function ApiPoolPage() {
   const reorderMutation = useMutation({
     mutationFn: reorderEntries,
     onSuccess: () => {
+      const scrollY = window.scrollY;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       setLocalOrder(null);
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteEntry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      setDeleteTarget(null);
+    },
+  });
+
+  const handleToggleIntent = useCallback(async (
+    entry: ApiEntry,
+    enabled: boolean,
+    options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean },
+  ) => {
+    const hotKey = options.ctrlKey || options.metaKey;
+
+    if (options.shiftKey) {
+      const targetEntries = filteredEntries;
+      const currentIds = localOrder
+        ? localOrder
+        : displayEntries.map((e) => e.id);
+      await Promise.all(targetEntries.map((e) => toggleEntry(e.id, enabled)));
+      queryClient.setQueryData<ApiEntry[] | undefined>(["entries"], (prev) =>
+        prev?.map((e) => targetEntries.some((t) => t.id === e.id) ? { ...e, enabled } : e),
+      );
+      setLocalOrder(currentIds);
+      requestAnimationFrame(() => {
+        queryClient.invalidateQueries({ queryKey: ["entries"] });
+      });
+      return;
+    }
+
+    await toggleEntry(entry.id, enabled);
+    queryClient.setQueryData<ApiEntry[] | undefined>(["entries"], (prev) =>
+      prev?.map((e) => (e.id === entry.id ? { ...e, enabled } : e)),
+    );
+
+    if (enabled && hotKey) {
+      const current = localOrder
+        ? localOrder.map((id) => displayEntries.find((e) => e.id === id)).filter(Boolean) as ApiEntry[]
+        : displayEntries;
+      const orderedIds = [entry.id, ...current.filter((e) => e.id !== entry.id).map((e) => e.id)];
+      const scrollY = window.scrollY;
+      setLocalOrder(orderedIds);
+      reorderMutation.mutate(orderedIds);
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    } else {
+      // Preserve visual position after single toggle
+      const currentIds = localOrder
+        ? localOrder
+        : displayEntries.map((e) => e.id);
+      setLocalOrder(currentIds);
+      requestAnimationFrame(() => {
+        queryClient.invalidateQueries({ queryKey: ["entries"] });
+      });
+    }
+  }, [displayEntries, filteredEntries, localOrder, queryClient, reorderMutation]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -351,8 +426,20 @@ export function ApiPoolPage() {
         });
         try {
           const result = await testEntryLatency(entry.id);
-          results[entry.id] = result.response_ms;
-          if (result.status === "cooldown") {
+          if (result.status === "ok") {
+            results[entry.id] = result.response_ms;
+          } else if (result.status === "failed") {
+            results[entry.id] = "X";
+            await toggleEntry(entry.id, false);
+            queryClient.setQueryData<ApiEntry[] | undefined>(["entries"], (prev) =>
+              prev?.map((e) => (e.id === entry.id ? { ...e, enabled: false } : e)),
+            );
+          } else if (result.status === "disabled") {
+            results[entry.id] = result.response_ms || "X";
+            queryClient.setQueryData<ApiEntry[] | undefined>(["entries"], (prev) =>
+              prev?.map((e) => (e.id === entry.id ? { ...e, enabled: false } : e)),
+            );
+          } else {
             results[entry.id] = "X";
           }
         } catch {
@@ -397,16 +484,28 @@ export function ApiPoolPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
+      <div className="sticky top-0 z-10 bg-background pt-1 pb-3">
+        <div className="relative">
           <Input
-            className="flex-1"
+            className="flex-1 pr-8"
             placeholder={t("apiPool.search")}
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
           />
-        </CardHeader>
-        <CardContent>
+          {filterText ? (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setFilterText("")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
           {!entries?.length ? (
             <div className="flex h-48 items-center justify-center text-muted-foreground">
               {t("apiPool.empty")}
@@ -423,7 +522,15 @@ export function ApiPoolPage() {
               >
                 <div className="flex flex-col gap-3">
                   {filteredEntries.map((entry) => (
-                    <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} />
+                    <SortablePoolEntryCard
+                      key={entry.id}
+                      entry={entry}
+                      onTest={setTestEntry}
+                      onDelete={setDeleteTarget}
+                      onToggleIntent={handleToggleIntent}
+                      testingEntryIds={testingEntryIds}
+                      testResult={testResults[entry.id]}
+                    />
                   ))}
                 </div>
               </SortableContext>
@@ -434,6 +541,31 @@ export function ApiPoolPage() {
 
       <AddApiDialog open={showAdd} onOpenChange={setShowAdd} channels={channels || []} />
       <TestChatDialog open={!!testEntry} onOpenChange={(v) => !v && setTestEntry(null)} entry={testEntry} />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("apiPool.deleteTitle")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("apiPool.deleteDesc", { name: `${deleteTarget?.channel_name || "—"} / ${deleteTarget?.model || ""}` })}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+              }}
+            >
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

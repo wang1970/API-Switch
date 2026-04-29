@@ -112,6 +112,7 @@ pub fn run() {
             commands::pool::list_entries,
             commands::pool::toggle_entry,
             commands::pool::reorder_entries,
+            commands::pool::delete_entry,
             commands::pool::create_entry,
             commands::pool::test_entry_latency,
             commands::pool::update_entry_response_ms,
@@ -135,6 +136,8 @@ pub fn run() {
             commands::proxy_cmd::get_proxy_status,
             commands::proxy_cmd::refresh_tray_menu,
             commands::test_chat::test_chat,
+            commands::cli::set_user_env_vars,
+            commands::cli::get_cli_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

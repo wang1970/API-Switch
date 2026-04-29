@@ -7,7 +7,7 @@ use crate::proxy::protocol::get_adapter;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Instant;
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 
 #[derive(Serialize)]
 pub struct TestResult {
@@ -62,6 +62,21 @@ pub fn reorder_entries(
 }
 
 #[tauri::command]
+pub fn delete_entry(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    state.db.delete_entry(&id)?;
+    if let Ok(new_menu) = build_tray_menu(&app) {
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn create_entry(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -81,7 +96,7 @@ pub fn create_entry(
 
 #[tauri::command]
 pub async fn test_entry_latency(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
 ) -> Result<TestResult, AppError> {
@@ -95,6 +110,12 @@ pub async fn test_entry_latency(
         .clone();
 
     let channel = db.get_channel(&entry.channel_id)?;
+    if !entry.enabled || !channel.enabled {
+        return Ok(TestResult {
+            status: "disabled".to_string(),
+            response_ms: entry.response_ms.unwrap_or_else(|| "X".to_string()),
+        });
+    }
     let adapter = get_adapter(&channel.api_type);
     let url = adapter.build_chat_url(&channel.base_url, &entry.model);
 
@@ -120,15 +141,8 @@ pub async fn test_entry_latency(
         Ok(response) => response,
         Err(_) => {
             let _ = db.update_entry_response_ms(&entry_id, "X");
-            let _ = db.toggle_entry(&entry_id, false);
-            let _ = app.emit("entries-changed", ());
-            if let Ok(new_menu) = build_tray_menu(&app) {
-                if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                    let _ = tray.set_menu(Some(new_menu));
-                }
-            }
             return Ok(TestResult {
-                status: "cooldown".to_string(),
+                status: "failed".to_string(),
                 response_ms: "X".to_string(),
             });
         }
@@ -139,15 +153,8 @@ pub async fn test_entry_latency(
     if !response.status().is_success() {
         let _error_body = response.text().await.unwrap_or_default();
         let _ = db.update_entry_response_ms(&entry_id, "X");
-        let _ = db.toggle_entry(&entry_id, false);
-        let _ = app.emit("entries-changed", ());
-        if let Ok(new_menu) = build_tray_menu(&app) {
-            if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                let _ = tray.set_menu(Some(new_menu));
-            }
-        }
         return Ok(TestResult {
-            status: "cooldown".to_string(),
+            status: "failed".to_string(),
             response_ms: "X".to_string(),
         });
     }

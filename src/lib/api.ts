@@ -74,6 +74,10 @@ export async function reorderEntries(orderedIds: string[]): Promise<void> {
   return invoke("reorder_entries", { orderedIds });
 }
 
+export async function deleteEntry(id: string): Promise<void> {
+  return invoke("delete_entry", { id });
+}
+
 export async function createEntry(params: CreateEntryParams): Promise<ApiEntry> {
   return invoke("create_entry", { params });
 }
@@ -89,6 +93,14 @@ export async function testEntryLatency(entryId: string): Promise<TestLatencyResu
 
 export async function updateEntryResponseMs(entryId: string, responseMs: string): Promise<void> {
   return invoke("update_entry_response_ms", { entryId, responseMs });
+}
+
+export async function setUserEnvVars(vars: { key: string; value: string }[]): Promise<void> {
+  return invoke("set_user_env_vars", { vars });
+}
+
+export async function getCliData(): Promise<unknown | null> {
+  return invoke("get_cli_data");
 }
 
 // --- Access Keys ---

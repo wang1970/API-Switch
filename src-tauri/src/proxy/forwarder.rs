@@ -403,10 +403,13 @@ fn build_streaming_response(
     let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
         let _ = &guard; // keep guard alive in the closure's capture list
 
-        if ping_interval.as_mut().poll(cx).is_ready() {
-            ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
-            return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
-        }
+        // Temporarily disable downstream SSE ping injection.
+        // Some clients do not correctly ignore SSE comment frames like `: PING\n\n`
+        // and may concatenate them into JSON payloads, causing parse errors.
+        // if ping_interval.as_mut().poll(cx).is_ready() {
+        //     ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
+        //     return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
+        // }
 
         if idle_timeout.as_mut().poll(cx).is_ready() {
             if !logged.swap(true, Ordering::SeqCst) {
