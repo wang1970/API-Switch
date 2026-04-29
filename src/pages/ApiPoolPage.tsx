@@ -26,7 +26,7 @@ import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, te
 import type { ApiEntry, Channel } from "@/types";
 import { cn } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
-import { getCatalogModel, formatTokenCount, type CatalogModel } from "@/lib/modelsCatalog";
+import { getCatalogModel, getCatalogProviderLogo, formatTokenCount, type CatalogModel } from "@/lib/modelsCatalog";
 import {
   DndContext,
   closestCenter,
@@ -172,6 +172,7 @@ function SortablePoolEntryCard({
     opacity: isDragging ? 0.8 : undefined,
   };
   const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
+  const logoSrc = getCatalogProviderLogo(entry.model);
 
   return (
     <Card
@@ -187,30 +188,43 @@ function SortablePoolEntryCard({
         >
           <GripVertical className="h-3.5 w-3.5 shrink-0" />
         </div>
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-2 min-w-0">
-            <StatusDot state={getEntryStatus(entry)} />
-            <span className="font-medium truncate">
-              {entry.channel_name || "—"} / {entry.model}
-            </span>
-            {testingEntryIds?.has(entry.id) ? (
-              <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
-            ) : testResult === "X" ? (
-              <XCircle className="h-3 w-3 text-red-500 shrink-0" />
-            ) : testResult ? (
-              <span className="text-xs text-green-600 shrink-0">({testResult})</span>
-            ) : entry.response_ms === "X" ? (
-              <XCircle className="h-3 w-3 text-red-500 shrink-0" />
-            ) : entry.response_ms ? (
-              <span className="text-xs text-green-600 shrink-0">({entry.response_ms})</span>
-            ) : null}
-            {cooldownRemaining ? (
-              <span className="text-xs text-red-500 shrink-0">
-                {t("apiPool.cooldownInline", { time: cooldownRemaining })}
-              </span>
-            ) : null}
+        <div className="flex-1 min-w-0 overflow-hidden flex items-start gap-3">
+          <div className="h-10 w-10 rounded-md bg-muted/40 border flex items-center justify-center shrink-0 mt-0.5">
+            <img
+              src={logoSrc}
+              alt="provider"
+              className="h-6 w-6 shrink-0"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = "/logo/custom.svg";
+              }}
+            />
           </div>
-          <ModelMetaBlock modelId={entry.model} />
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="flex items-center gap-2 min-w-0">
+              <StatusDot state={getEntryStatus(entry)} />
+              <span className="font-medium truncate">
+                {entry.channel_name || "—"} / {entry.model}
+              </span>
+              {testingEntryIds?.has(entry.id) ? (
+                <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+              ) : testResult === "X" ? (
+                <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+              ) : testResult ? (
+                <span className="text-xs text-green-600 shrink-0">({testResult})</span>
+              ) : entry.response_ms === "X" ? (
+                <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+              ) : entry.response_ms ? (
+                <span className="text-xs text-green-600 shrink-0">({entry.response_ms})</span>
+              ) : null}
+              {cooldownRemaining ? (
+                <span className="text-xs text-red-500 shrink-0">
+                  {t("apiPool.cooldownInline", { time: cooldownRemaining })}
+                </span>
+              ) : null}
+            </div>
+            <ModelMetaBlock modelId={entry.model} />
+          </div>
         </div>
         <Button
           variant="ghost"

@@ -2,6 +2,7 @@ import rawCatalog from "../../models.json";
 
 export type CatalogModel = {
   id: string;
+  provider_id?: string;
   name?: string;
   family?: string;
   release_date?: string;
@@ -121,22 +122,23 @@ function similarityScore(input: string, candidate: string): number {
 
 for (const provider of Object.values(catalog)) {
   for (const [modelKey, model] of Object.entries(provider.models || {})) {
+    const enrichedModel: CatalogModel = { ...model, provider_id: provider.id };
     const key = modelKey.toLowerCase();
     const current = modelIndex.get(key);
-    if (!current || scoreModel(model) > scoreModel(current)) {
-      modelIndex.set(key, model);
+    if (!current || scoreModel(enrichedModel) > scoreModel(current)) {
+      modelIndex.set(key, enrichedModel);
     }
-    if (model.id && model.id.toLowerCase() !== key) {
-      const idKey = model.id.toLowerCase();
+    if (enrichedModel.id && enrichedModel.id.toLowerCase() !== key) {
+      const idKey = enrichedModel.id.toLowerCase();
       const currentById = modelIndex.get(idKey);
-      if (!currentById || scoreModel(model) > scoreModel(currentById)) {
-        modelIndex.set(idKey, model);
+      if (!currentById || scoreModel(enrichedModel) > scoreModel(currentById)) {
+        modelIndex.set(idKey, enrichedModel);
       }
     }
 
-    for (const variant of new Set([key, model.id?.toLowerCase()].filter(Boolean) as string[])) {
+    for (const variant of new Set([key, enrichedModel.id?.toLowerCase()].filter(Boolean) as string[])) {
       for (const normalized of buildKeyVariants(variant)) {
-        modelEntries.push({ key: variant, normalized, model });
+        modelEntries.push({ key: variant, normalized, model: enrichedModel });
       }
     }
   }
@@ -149,25 +151,64 @@ export function getCatalogModel(modelId: string): CatalogModel | null {
   const direct = modelIndex.get(key);
   if (direct) return direct;
 
-  const variants = buildKeyVariants(key);
-  for (const variant of variants) {
-    const matched = modelIndex.get(variant);
-    if (matched) return matched;
-  }
-
-  let best: { model: CatalogModel; score: number } | null = null;
-  for (const variant of variants) {
+  let best: { score: number; model: CatalogModel } | null = null;
+  for (const variant of buildKeyVariants(key)) {
+    const directVariant = modelIndex.get(variant);
+    if (directVariant) return directVariant;
     for (const entry of modelEntries) {
       const score = similarityScore(variant, entry.normalized);
       if (score <= 0) continue;
-      const weighted = score + scoreModel(entry.model);
-      if (!best || weighted > best.score) {
-        best = { model: entry.model, score: weighted };
+      if (!best || score > best.score || (score === best.score && scoreModel(entry.model) > scoreModel(best.model))) {
+        best = { score, model: entry.model };
       }
     }
   }
 
-  return best?.score && best.score >= 150 ? best.model : null;
+  return best?.model ?? null;
+}
+
+const brandRules: [RegExp, string][] = [
+  [/^gpt-/, "openai"],
+  [/^o[134]-/, "openai"],
+  [/^chatgpt-/, "openai"],
+  [/^codex-/, "openai"],
+  [/^dall-e/, "openai"],
+  [/^claude-/, "anthropic"],
+  [/^gemini-/, "google"],
+  [/^glm-/, "zhipu"],
+  [/^mimo-/, "xiaomi"],
+  [/^deepseek-/, "deepseek"],
+  [/^qwen-/, "alibaba"],
+  [/^kimi-/, "moonshot"],
+  [/^grok-/, "xai"],
+  [/^mistral-/, "mistral"],
+  [/^llama-/, "meta"],
+  [/^minimax-/, "minimax"],
+  [/^yi-/, "01ai"],
+  [/^ernie-/, "baidu"],
+  [/^hunyuan-/, "tencent"],
+  [/^doubao-/, "volcengine"],
+  [/^jina-/, "jina"],
+  [/^cohere-/, "cohere"],
+];
+
+export function getCatalogProviderLogo(modelId: string): string {
+  const id = modelId.trim().toLowerCase();
+
+  // Layer 1: namespace prefix (e.g. openai/gpt-5.5 -> openai)
+  const slashIdx = id.indexOf("/");
+  if (slashIdx > 0) {
+    const ns = id.slice(0, slashIdx);
+    return `/logo/${ns}.svg`;
+  }
+
+  // Layer 2: brand prefix rules
+  for (const [re, brand] of brandRules) {
+    if (re.test(id)) return `/logo/${brand}.svg`;
+  }
+
+  // Layer 3: custom fallback
+  return "/logo/custom.svg";
 }
 
 export function formatTokenCount(value?: number): string | null {
