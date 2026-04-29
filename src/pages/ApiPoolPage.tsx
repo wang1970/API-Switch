@@ -338,7 +338,13 @@ export function ApiPoolPage() {
     // Test one channel sequentially
     const testChannel = async (channelEntries: ApiEntry[]) => {
       for (const entry of channelEntries) {
-        setTestingEntryIds((prev) => new Set(prev).add(entry.id));
+        setTestingEntryIds((prev) => {
+          const next = new Set(prev);
+          // Remove previous entries from this channel
+          for (const e of channelEntries) next.delete(e.id);
+          next.add(entry.id);
+          return next;
+        });
         try {
           const result = await testEntryLatency(entry.id);
           results[entry.id] = result.response_ms;
