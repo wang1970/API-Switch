@@ -295,16 +295,15 @@ async fn forward_single(
     let status = response.status().as_u16();
 
     if !response.status().is_success() {
-        // Read error body (raw bytes first to preserve format)
+        // Read full error body for debugging
         let raw_body = response.bytes().await.unwrap_or_default();
         let error_body = String::from_utf8_lossy(&raw_body);
-        let sanitized: String = error_body.chars().take(300).collect();
         
         // If error body is empty, just use status code
-        let error_msg = if sanitized.is_empty() {
+        let error_msg = if error_body.is_empty() {
             format!("Upstream error {status}")
         } else {
-            format!("Upstream error {status}: {sanitized}")
+            format!("Upstream error {status}: {error_body}")
         };
         return Err((error_msg, status));
     }
