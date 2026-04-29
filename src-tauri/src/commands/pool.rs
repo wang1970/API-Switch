@@ -7,7 +7,7 @@ use crate::proxy::protocol::get_adapter;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Instant;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 #[derive(Serialize)]
 pub struct TestResult {
@@ -81,6 +81,7 @@ pub fn create_entry(
 
 #[tauri::command]
 pub async fn test_entry_latency(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
 ) -> Result<TestResult, AppError> {
@@ -115,16 +116,36 @@ pub async fn test_entry_latency(
         .json(&upstream_body);
 
     let start = Instant::now();
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::Network(format!("Request failed: {e}")))?;
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(_) => {
+            let _ = db.update_entry_response_ms(&entry_id, "X");
+            let _ = db.toggle_entry(&entry_id, false);
+            let _ = app.emit("entries-changed", ());
+            if let Ok(new_menu) = build_tray_menu(&app) {
+                if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                    let _ = tray.set_menu(Some(new_menu));
+                }
+            }
+            return Ok(TestResult {
+                status: "cooldown".to_string(),
+                response_ms: "X".to_string(),
+            });
+        }
+    };
 
     let latency_ms = start.elapsed().as_millis() as u64;
 
     if !response.status().is_success() {
         let _error_body = response.text().await.unwrap_or_default();
         let _ = db.update_entry_response_ms(&entry_id, "X");
+        let _ = db.toggle_entry(&entry_id, false);
+        let _ = app.emit("entries-changed", ());
+        if let Ok(new_menu) = build_tray_menu(&app) {
+            if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                let _ = tray.set_menu(Some(new_menu));
+            }
+        }
         return Ok(TestResult {
             status: "cooldown".to_string(),
             response_ms: "X".to_string(),
