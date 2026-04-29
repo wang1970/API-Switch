@@ -295,9 +295,18 @@ async fn forward_single(
     let status = response.status().as_u16();
 
     if !response.status().is_success() {
-        let error_body = response.text().await.unwrap_or_default();
+        // Read error body (raw bytes first to preserve format)
+        let raw_body = response.bytes().await.unwrap_or_default();
+        let error_body = String::from_utf8_lossy(&raw_body);
         let sanitized: String = error_body.chars().take(300).collect();
-        return Err((format!("Upstream error {status}: {sanitized}"), status));
+        
+        // If error body is empty, just use status code
+        let error_msg = if sanitized.is_empty() {
+            format!("Upstream error {status}")
+        } else {
+            format!("Upstream error {status}: {sanitized}")
+        };
+        return Err((error_msg, status));
     }
 
     let status_code = status as i32;
