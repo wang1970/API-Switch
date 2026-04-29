@@ -183,7 +183,6 @@ const brandRules: [RegExp, string][] = [
   [/^grok-/, "xai"],
   [/^mistral-/, "mistral"],
   [/^llama-/, "meta"],
-  [/^minimax-/, "minimax"],
   [/^yi-/, "01ai"],
   [/^ernie-/, "baidu"],
   [/^hunyuan-/, "tencent"],
@@ -192,22 +191,62 @@ const brandRules: [RegExp, string][] = [
   [/^cohere-/, "cohere"],
 ];
 
+const namespaceAliases: Record<string, string> = {
+  minimaxai: "minimax",
+  xiaomi: "xiaomi",
+  openai: "openai",
+  anthropic: "anthropic",
+  google: "google",
+  gemini: "google",
+  zhipuai: "zhipu",
+  zhipu: "zhipu",
+  moonshotai: "moonshot",
+  moonshot: "moonshot",
+  xai: "xai",
+  deepseek: "deepseek",
+  qwen: "alibaba",
+  alibaba: "alibaba",
+};
+
+const familyRules: [RegExp, string][] = [
+  [/^gpt/, "openai"],
+  [/^claude/, "anthropic"],
+  [/^gemini/, "google"],
+  [/^glm/, "zhipu"],
+  [/^mimo/, "xiaomi"],
+  [/^minimax/, "minimax"],
+  [/^deepseek/, "deepseek"],
+  [/^qwen/, "alibaba"],
+  [/^kimi/, "moonshot"],
+  [/^grok/, "xai"],
+  [/^mistral/, "mistral"],
+  [/^llama/, "meta"],
+];
+
 export function getCatalogProviderLogo(modelId: string): string {
   const id = modelId.trim().toLowerCase();
+  const catalogModel = getCatalogModel(modelId);
+  const family = catalogModel?.family?.trim().toLowerCase() || "";
 
-  // Layer 1: namespace prefix (e.g. openai/gpt-5.5 -> openai)
+  // Layer 1: family rules (most stable for repeated provider aliases like minimaxai/...)
+  for (const [re, brand] of familyRules) {
+    if (family && re.test(family)) return `/logo/${brand}.svg`;
+  }
+
+  // Layer 2: namespace prefix with alias normalization
   const slashIdx = id.indexOf("/");
   if (slashIdx > 0) {
     const ns = id.slice(0, slashIdx);
-    return `/logo/${ns}.svg`;
+    const brand = namespaceAliases[ns] || ns;
+    return `/logo/${brand}.svg`;
   }
 
-  // Layer 2: brand prefix rules
+  // Layer 3: model id prefix rules
   for (const [re, brand] of brandRules) {
     if (re.test(id)) return `/logo/${brand}.svg`;
   }
 
-  // Layer 3: custom fallback
+  // Layer 4: custom fallback
   return "/logo/custom.svg";
 }
 

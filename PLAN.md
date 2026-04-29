@@ -438,6 +438,7 @@ api-switch/
 | 9 | **删除确认按钮视觉修复** | `destructive` 按钮前景色修正为白色，避免红底红字。 |
 | 10 | **SSE PING 临时禁用** | 已暂时注释掉下游 `: PING\n\n` 注入，避免部分下游把 comment 帧拼进 JSON 导致解析失败。 |
 | 11 | **流式核心论证文档** | 新增 `_internal_stream_core_review.md`，对比 NEW-API 核心稳定性来源，分析未来如何在保留项目特色的前提下逐步演进。 |
+| 12 | **API 池 provider logo 显示** | API 池卡片左侧新增 provider/logo 区块，常见品牌按 `family > namespace alias > model prefix > custom` 规则显示 SVG logo，缺失时回退 `custom.svg`。 |
 
 ### 2026-04-29 — 错误冷却策略优化 (个人模式) / 空模型名修复
 

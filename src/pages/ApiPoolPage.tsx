@@ -202,10 +202,9 @@ function SortablePoolEntryCard({
           </div>
           <div className="flex-1 min-w-0 overflow-hidden">
             <div className="flex items-center gap-2 min-w-0">
+              <span className="font-medium truncate">{entry.channel_name || "—"}</span>
               <StatusDot state={getEntryStatus(entry)} />
-              <span className="font-medium truncate">
-                {entry.channel_name || "—"} / {entry.model}
-              </span>
+              <span className="font-medium truncate">{entry.model}</span>
               {testingEntryIds?.has(entry.id) ? (
                 <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
               ) : testResult === "X" ? (
