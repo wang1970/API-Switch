@@ -23,8 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry } from "@/lib/api";
-import type { ApiEntry, Channel } from "@/types";
-import { cn } from "@/lib/utils";
+import type { ApiEntry, Channel, ModelSortMode } from "@/types";
+import { cn, formatResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount, type CatalogModel } from "@/lib/modelsCatalog";
 import {
@@ -223,7 +223,7 @@ function SortablePoolEntryCard({
               ) : entry.response_ms === "X" ? (
                 <XCircle className="h-3 w-3 text-red-500 shrink-0" />
               ) : entry.response_ms ? (
-                <span className="text-xs text-green-600 shrink-0">({entry.response_ms})</span>
+                <span className="text-xs text-green-600 shrink-0">({formatResponseMs(entry.response_ms)})</span>
               ) : null}
               {cooldownRemaining ? (
                 <span className="text-xs text-red-500 shrink-0">
@@ -289,6 +289,11 @@ export function ApiPoolPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
+  const [sortMode, setSortMode] = useState<ModelSortMode>(() => {
+    const saved = localStorage.getItem("api-switch-sort-mode");
+    if (saved === "latest" || saved === "fastest" || saved === "custom") return saved;
+    return "custom";
+  });
 
   // Listen for entries changes (cooldown, tray priority, etc.)
   useEffect(() => {
@@ -349,12 +354,36 @@ export function ApiPoolPage() {
     return map;
   }, [entries]);
 
-  const sorted = [...(entries || [])].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-    return a.sort_index - b.sort_index;
-  });
+  const sorted = useMemo(() => {
+    const list = [...(entries || [])];
 
-  const displayEntries = localOrder
+    if (sortMode === "latest") {
+      return list.sort((a, b) => {
+        const dateA = catalogMap.get(a.model)?.releaseDate || "";
+        const dateB = catalogMap.get(b.model)?.releaseDate || "";
+        return dateB.localeCompare(dateA);
+      });
+    }
+
+    const enabled = list.filter((e) => e.enabled);
+    const disabled = list.filter((e) => !e.enabled);
+
+    if (sortMode === "fastest") {
+      enabled.sort((a, b) => {
+        const msA = a.response_ms && a.response_ms !== "X" ? parseInt(a.response_ms, 10) : Infinity;
+        const msB = b.response_ms && b.response_ms !== "X" ? parseInt(b.response_ms, 10) : Infinity;
+        return msA - msB;
+      });
+      disabled.sort((a, b) => a.sort_index - b.sort_index);
+    } else {
+      enabled.sort((a, b) => a.sort_index - b.sort_index);
+      disabled.sort((a, b) => a.sort_index - b.sort_index);
+    }
+
+    return [...enabled, ...disabled];
+  }, [entries, sortMode, catalogMap]);
+
+  const displayEntries = localOrder && sortMode === "custom"
     ? localOrder
       .map((id) => sorted.find((e) => e.id === id))
       .filter(Boolean) as ApiEntry[]
@@ -418,7 +447,7 @@ export function ApiPoolPage() {
       prev?.map((e) => (e.id === entry.id ? { ...e, enabled } : e)),
     );
 
-    if (enabled && hotKey) {
+    if (enabled && hotKey && sortMode === "custom") {
       const current = localOrder
         ? localOrder.map((id) => displayEntries.find((e) => e.id === id)).filter(Boolean) as ApiEntry[]
         : displayEntries;
@@ -446,7 +475,14 @@ export function ApiPoolPage() {
     }),
   );
 
+  const handleSortModeChange = useCallback((mode: ModelSortMode) => {
+    setSortMode(mode);
+    setLocalOrder(null);
+    localStorage.setItem("api-switch-sort-mode", mode);
+  }, []);
+
   const handleDragEnd = (event: DragEndEvent) => {
+    if (sortMode !== "custom") return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -566,6 +602,21 @@ export function ApiPoolPage() {
               <X className="h-4 w-4" />
             </button>
           ) : null}
+        </div>
+        <div className="flex items-center justify-end mt-2">
+          <div className="flex items-center rounded-md border">
+            {(["custom", "latest", "fastest"] as ModelSortMode[]).map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant={sortMode === mode ? "default" : "ghost"}
+                className="h-7 rounded-none first:rounded-l-md last:rounded-r-md px-2.5 text-xs"
+                onClick={() => handleSortModeChange(mode)}
+              >
+                {t(`apiPool.sort.${mode}`)}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
