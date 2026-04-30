@@ -139,7 +139,7 @@ function formatCooldownRemaining(cooldownUntil: number | null | undefined) {
   return `${minutes}m`;
 }
 
-function SortablePoolEntryCard({
+function CardBody({
   entry,
   onTest,
   onDelete,
@@ -165,15 +165,83 @@ function SortablePoolEntryCard({
   catalogFeatures: string[];
 }) {
   const { t } = useTranslation();
+  const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
 
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: entry.id });
+  return (
+    <>
+      <div className="h-10 w-10 rounded-md bg-muted/40 border flex items-center justify-center shrink-0 mt-0.5">
+        <img
+          src={catalogLogo}
+          alt="provider"
+          className="h-6 w-6 shrink-0"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "/logo/custom.svg";
+          }}
+        />
+      </div>
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium truncate">{entry.channel_name || "—"}</span>
+          <StatusDot state={getEntryStatus(entry)} />
+          <span className="font-medium truncate">{entry.model}</span>
+          {testingEntryIds?.has(entry.id) ? (
+            <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+          ) : testResult === "X" ? (
+            <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+          ) : testResult ? (
+            <span className="text-xs text-green-600 shrink-0">({testResult})</span>
+          ) : entry.response_ms === "X" ? (
+            <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+          ) : entry.response_ms ? (
+            <span className="text-xs text-green-600 shrink-0">({formatResponseMs(entry.response_ms)})</span>
+          ) : null}
+          {cooldownRemaining ? (
+            <span className="text-xs text-red-500 shrink-0">
+              {t("apiPool.cooldownInline", { time: cooldownRemaining })}
+            </span>
+          ) : null}
+        </div>
+        <ModelMetaBlock
+          releaseDate={catalogReleaseDate}
+          context={catalogContext}
+          output={catalogOutput}
+          features={catalogFeatures.map(f => t(`apiPool.modelMeta.features.${f}`))}
+        />
+      </div>
+      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground touch-none" onClick={() => onTest(entry)}>
+        <MessageSquare className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 touch-none" onClick={() => onDelete(entry)}>
+        <Trash2 className="h-4 w-4" />
+      </Button>
+      <Switch
+        checked={entry.enabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleIntent(entry, !entry.enabled, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
+        }}
+        onCheckedChange={() => {}}
+        className="touch-none"
+      />
+    </>
+  );
+}
+
+function SortablePoolEntryCard(props: {
+  entry: ApiEntry;
+  onTest: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry) => void;
+  onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
+  testingEntryIds?: Set<string>;
+  testResult?: string;
+  catalogLogo: string;
+  catalogReleaseDate?: string;
+  catalogContext?: string;
+  catalogOutput?: string;
+  catalogFeatures: string[];
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.entry.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -181,97 +249,36 @@ function SortablePoolEntryCard({
     zIndex: isDragging ? 10 : undefined,
     opacity: isDragging ? 0.8 : undefined,
   };
-  const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
 
   return (
-    <Card
-      ref={setNodeRef}
-      style={style}
-      className={cn("transition-opacity", !entry.enabled && "opacity-60")}
-    >
+    <Card ref={setNodeRef} style={style} className={cn("transition-opacity", !props.entry.enabled && "opacity-60")}>
       <CardContent className="flex items-center gap-3 p-4">
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-pointer text-muted-foreground hover:text-foreground"
-        >
+        <div {...attributes} {...listeners} className="cursor-pointer text-muted-foreground hover:text-foreground">
           <GripVertical className="h-3.5 w-3.5 shrink-0" />
         </div>
-        <div className="flex-1 min-w-0 overflow-hidden flex items-start gap-3">
-          <div className="h-10 w-10 rounded-md bg-muted/40 border flex items-center justify-center shrink-0 mt-0.5">
-            <img
-              src={catalogLogo}
-              alt="provider"
-              className="h-6 w-6 shrink-0"
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.src = "/logo/custom.svg";
-              }}
-            />
-          </div>
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-medium truncate">{entry.channel_name || "—"}</span>
-              <StatusDot state={getEntryStatus(entry)} />
-              <span className="font-medium truncate">{entry.model}</span>
-              {testingEntryIds?.has(entry.id) ? (
-                <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
-              ) : testResult === "X" ? (
-                <XCircle className="h-3 w-3 text-red-500 shrink-0" />
-              ) : testResult ? (
-                <span className="text-xs text-green-600 shrink-0">({testResult})</span>
-              ) : entry.response_ms === "X" ? (
-                <XCircle className="h-3 w-3 text-red-500 shrink-0" />
-              ) : entry.response_ms ? (
-                <span className="text-xs text-green-600 shrink-0">({formatResponseMs(entry.response_ms)})</span>
-              ) : null}
-              {cooldownRemaining ? (
-                <span className="text-xs text-red-500 shrink-0">
-                  {t("apiPool.cooldownInline", { time: cooldownRemaining })}
-                </span>
-              ) : null}
-            </div>
-            <ModelMetaBlock
-              releaseDate={catalogReleaseDate}
-              context={catalogContext}
-              output={catalogOutput}
-              features={catalogFeatures.map(f => {
-                const key = `apiPool.modelMeta.features.${f}`;
-                return t(key);
-              })}
-            />
-          </div>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground touch-none"
-          onClick={() => onTest(entry)}
-        >
-          <MessageSquare className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-red-500 touch-none"
-          onClick={() => onDelete(entry)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-        <Switch
-          checked={entry.enabled}
-          onClick={(e) => {
-            e.stopPropagation();
-            const nextEnabled = !entry.enabled;
-            onToggleIntent(entry, nextEnabled, {
-              ctrlKey: e.ctrlKey,
-              shiftKey: e.shiftKey,
-              metaKey: e.metaKey,
-            });
-          }}
-          onCheckedChange={() => {}}
-          className="touch-none"
-        />
+        <CardBody {...props} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function PoolEntryCard(props: {
+  entry: ApiEntry;
+  onTest: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry) => void;
+  onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
+  testingEntryIds?: Set<string>;
+  testResult?: string;
+  catalogLogo: string;
+  catalogReleaseDate?: string;
+  catalogContext?: string;
+  catalogOutput?: string;
+  catalogFeatures: string[];
+}) {
+  return (
+    <Card className={cn("transition-opacity", !props.entry.enabled && "opacity-60")}>
+      <CardContent className="flex items-center gap-3 p-4">
+        <CardBody {...props} />
       </CardContent>
     </Card>
   );
@@ -570,7 +577,7 @@ export function ApiPoolPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold">{t("apiPool.title")}</h1>
@@ -588,8 +595,8 @@ export function ApiPoolPage() {
         </div>
       </div>
 
-      <div className="sticky top-0 z-10 bg-background pt-1 pb-3">
-        <div className="relative">
+      <div className="sticky top-0 z-10 bg-background pt-1 pb-0 mt-3">
+        <div className="relative mb-4">
           <Input
             className="flex-1 pr-8"
             placeholder={t("apiPool.search")}
@@ -606,7 +613,7 @@ export function ApiPoolPage() {
             </button>
           ) : null}
         </div>
-        <div className="flex items-center justify-end mt-2">
+        <div className="flex items-center justify-end mt-1">
           <div className="flex items-center rounded-md border">
             {(["custom", "latest", "fastest"] as ModelSortMode[]).map((mode) => (
               <Button
@@ -624,12 +631,12 @@ export function ApiPoolPage() {
       </div>
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-6">
           {!entries?.length ? (
             <div className="flex h-48 items-center justify-center text-muted-foreground">
               {t("apiPool.empty")}
             </div>
-          ) : (
+          ) : sortMode === "custom" ? (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -659,6 +666,25 @@ export function ApiPoolPage() {
                 </div>
               </SortableContext>
             </DndContext>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredEntries.map((entry) => (
+                <PoolEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  onTest={setTestEntry}
+                  onDelete={setDeleteTarget}
+                  onToggleIntent={handleToggleIntent}
+                  testingEntryIds={testingEntryIds}
+                  testResult={testResults[entry.id]}
+                  catalogLogo={catalogMap.get(entry.model)?.logo || "/logo/custom.svg"}
+                  catalogReleaseDate={catalogMap.get(entry.model)?.releaseDate}
+                  catalogContext={catalogMap.get(entry.model)?.context}
+                  catalogOutput={catalogMap.get(entry.model)?.output}
+                  catalogFeatures={catalogMap.get(entry.model)?.features || []}
+                />
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>

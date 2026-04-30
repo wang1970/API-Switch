@@ -144,8 +144,6 @@ for (const provider of Object.values(catalog)) {
   }
 }
 
-const catalogModelCache = new Map<string, CatalogModel | null>();
-
 export function getCatalogModel(modelId: string): CatalogModel | null {
   const key = modelId.trim().toLowerCase();
   if (!key) return null;
