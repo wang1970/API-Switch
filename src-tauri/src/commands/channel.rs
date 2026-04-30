@@ -7,6 +7,15 @@ use crate::build_tray_menu;
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+#[derive(Deserialize)]
+pub struct ModelCatalogMetaInput {
+    pub model: String,
+    pub provider_logo: String,
+    pub release_date: String,
+    pub model_meta_zh: String,
+    pub model_meta_en: String,
+}
+
 #[derive(Clone)]
 struct ProbeSuccess {
     models: Vec<ModelInfo>,
@@ -560,9 +569,20 @@ pub fn select_models(
     channel_id: String,
     model_names: Vec<String>,
     available_models: Vec<ModelInfo>,
+    catalog_meta: Vec<ModelCatalogMetaInput>,
 ) -> Result<(), AppError> {
     state.db.update_channel_models(&channel_id, &available_models, &model_names)?;
-    state.db.sync_entries_for_channel(&channel_id, &model_names)?;
+    let catalog_meta: Vec<crate::database::ModelCatalogMetaInput> = catalog_meta
+        .into_iter()
+        .map(|item| crate::database::ModelCatalogMetaInput {
+            model: item.model,
+            provider_logo: item.provider_logo,
+            release_date: item.release_date,
+            model_meta_zh: item.model_meta_zh,
+            model_meta_en: item.model_meta_en,
+        })
+        .collect();
+    state.db.sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));

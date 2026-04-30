@@ -216,12 +216,14 @@ Client → POST /v1/chat/completions
 
 ### P1 — 个人使用体验与稳定性
 
-- [ ] **模型目录信息预计算入库**:
-    - **问题**: 当前 `modelsCatalog.ts` 的 `getCatalogModel` 在每次渲染时对每个 entry 做模糊匹配（遍历 4.3MB models.json 构建的 modelEntries 数组），70 个模型每次 render 触发 140 次查询，导致 API 管理页面加载缓慢。
-    - **方案**: 添加模型时调一次 `getCatalogModel`，结果写入 DB；渲染时直接读字段，零 catalog 查询。
-    - **DB 改动**: `api_entries` 表新增 4 个字段：`provider_logo TEXT`、`release_date TEXT`、`model_desc_zh TEXT`、`model_desc_en TEXT`。
-    - **流程**: 添加模型 → 查 catalog → 写入 DB → 渲染直接读 → 排序直接用 `release_date` → Logo 直接用 `provider_logo`。
-    - **附带优化**: 检测同名模型是否已存在，避免重复入库；`modelsCatalog.ts` 保留但只在添加流程中使用。
+- [x] **模型目录信息预计算入库**:
+    - **方案**: `api_entries` 表新增 `provider_logo`、`release_date`、`model_meta_zh`、`model_meta_en` 四个字段。
+    - **写入时机**: 手动添加模型时（`AddApiDialog`）和 Channel 选择模型时（`selectModels`）均从 `models.json` 计算 metadata 并直接写入 DB。
+    - **旧数据回填**: 进入 API 管理页时检测缺失字段的 entry，批量调用 `backfillEntryCatalogMeta` 补齐。
+    - **渲染主路径**: UI 优先读 `entry.provider_logo / release_date / model_meta_zh / model_meta_en`，缺失时 fallback 到前端 `modelsCatalog.ts`。
+    - **排序**: `latest` 模式前端和后端均直接用 `entry.release_date` 排序。
+    - **AUTO 路由**: `custom` → sort_index，`fastest` → response_ms，`latest` → release_date。
+    - **Tray Top5**: 跟随 `default_sort_mode` 排序。
 - [ ] **Responses API 支持**: 新增 `/v1/responses` 路由，支持 OpenAI Responses API 格式（GPT-5.5 等新模型需要），包含请求/响应格式转换
 - [ ] **客户端断开精准检测**: 细分 client_gone / runtime cancellation / 其他 drop
 - [ ] **前端统一 Toast 错误提示**: 替代零散 `alert()` 和静默失败

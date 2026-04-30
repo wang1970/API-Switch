@@ -56,8 +56,16 @@ export async function fetchModelsDirect(apiType: string, baseUrl: string, apiKey
   return invoke("fetch_models_direct", { apiType, baseUrl, apiKey, verified });
 }
 
-export async function selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[]): Promise<void> {
-  return invoke("select_models", { channelId, modelNames, availableModels });
+export interface ModelCatalogMetaUpdate {
+  model: string;
+  provider_logo: string;
+  release_date: string;
+  model_meta_zh: string;
+  model_meta_en: string;
+}
+
+export async function selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[], catalogMeta: ModelCatalogMetaUpdate[] = []): Promise<void> {
+  return invoke("select_models", { channelId, modelNames, availableModels, catalogMeta });
 }
 
 // --- API Pool ---
@@ -80,6 +88,18 @@ export async function deleteEntry(id: string): Promise<void> {
 
 export async function createEntry(params: CreateEntryParams): Promise<ApiEntry> {
   return invoke("create_entry", { params });
+}
+
+export interface EntryCatalogMetaUpdate {
+  id: string;
+  provider_logo: string;
+  release_date: string;
+  model_meta_zh: string;
+  model_meta_en: string;
+}
+
+export async function backfillEntryCatalogMeta(items: EntryCatalogMetaUpdate[]): Promise<void> {
+  return invoke("backfill_entry_catalog_meta", { items });
 }
 
 export interface TestLatencyResult {

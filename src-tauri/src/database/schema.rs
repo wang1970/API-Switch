@@ -32,6 +32,11 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
             sort_index INTEGER DEFAULT 0,
             enabled INTEGER DEFAULT 1,
             cooldown_until INTEGER,
+            response_ms TEXT DEFAULT '',
+            provider_logo TEXT DEFAULT '',
+            release_date TEXT DEFAULT '',
+            model_meta_zh TEXT DEFAULT '',
+            model_meta_en TEXT DEFAULT '',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
@@ -176,6 +181,10 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
 fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "cooldown_until", "INTEGER")?;
     ensure_column(conn, "api_entries", "response_ms", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "api_entries", "provider_logo", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "api_entries", "release_date", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "api_entries", "model_meta_zh", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "api_entries", "model_meta_en", "TEXT DEFAULT ''")?;
     Ok(())
 }
 

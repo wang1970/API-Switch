@@ -22,6 +22,22 @@ fn sort_by_index(entries: &mut [ApiEntry]) {
     entries.sort_by_key(|e| e.sort_index);
 }
 
+/// Sort entries by release date descending; entries without release date go last.
+fn sort_by_release_date(entries: &mut [ApiEntry]) {
+    entries.sort_by(|a, b| {
+        let date_cmp = b
+            .release_date
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.release_date.as_deref().unwrap_or(""));
+        if date_cmp == std::cmp::Ordering::Equal {
+            a.sort_index.cmp(&b.sort_index)
+        } else {
+            date_cmp
+        }
+    });
+}
+
 /// Resolve which entries to try for a given model request.
 /// Returns an ordered list of entries to attempt (failover in order).
 ///
@@ -85,11 +101,12 @@ pub async fn resolve(
     result
 }
 
-/// Apply sort mode to entries: "custom" → sort_index, others → latency.
-fn apply_sort_mode(entries: &mut [ApiEntry], sort_mode: &str) {
+/// Apply sort mode to entries: "custom" → sort_index, "fastest" → latency, "latest" → release_date.
+pub(crate) fn apply_sort_mode(entries: &mut [ApiEntry], sort_mode: &str) {
     match sort_mode {
-        "custom" => sort_by_index(entries),
-        _ => sort_by_latency(entries), // "fastest", "latest" both use latency
+        "fastest" => sort_by_latency(entries),
+        "latest" => sort_by_release_date(entries),
+        _ => sort_by_index(entries),
     }
 }
 
@@ -113,6 +130,10 @@ mod tests {
             channel_api_type: Some("openai".to_string()),
             response_ms: None,
             owned_by: None,
+            provider_logo: None,
+            release_date: None,
+            model_meta_zh: None,
+            model_meta_en: None,
         }
     }
 
@@ -172,5 +193,20 @@ mod tests {
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "fallback");
+    }
+
+    #[tokio::test]
+    async fn latest_sort_uses_release_date_descending() {
+        let breakers = RwLock::new(HashMap::new());
+        let mut older = entry("older", "old-model", true, 0);
+        older.release_date = Some("2023-01".to_string());
+        let mut newer = entry("newer", "new-model", true, 1);
+        newer.release_date = Some("2024-08".to_string());
+        let missing = entry("missing", "unknown-model", true, 2);
+        let enabled = vec![older, missing, newer];
+
+        let resolved = resolve("auto", &enabled, &breakers, "latest").await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["newer", "older", "missing"]);
     }
 }

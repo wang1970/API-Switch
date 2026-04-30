@@ -20,6 +20,23 @@ pub struct CreateEntryParams {
     pub channel_id: String,
     pub model: String,
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub provider_logo: String,
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(default)]
+    pub model_meta_zh: String,
+    #[serde(default)]
+    pub model_meta_en: String,
+}
+
+#[derive(Deserialize)]
+pub struct EntryCatalogMetaUpdate {
+    pub id: String,
+    pub provider_logo: String,
+    pub release_date: String,
+    pub model_meta_zh: String,
+    pub model_meta_en: String,
 }
 
 #[tauri::command]
@@ -85,13 +102,39 @@ pub fn create_entry(
     let display_name = params.display_name.as_deref().unwrap_or(&params.model);
     let entry = state
         .db
-        .create_entry_auto(&params.channel_id, &params.model, display_name)?;
+        .create_entry_auto(
+            &params.channel_id,
+            &params.model,
+            display_name,
+            &params.provider_logo,
+            &params.release_date,
+            &params.model_meta_zh,
+            &params.model_meta_en,
+        )?;
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));
         }
     }
     Ok(entry)
+}
+
+#[tauri::command]
+pub fn backfill_entry_catalog_meta(
+    state: State<'_, AppState>,
+    items: Vec<EntryCatalogMetaUpdate>,
+) -> Result<(), AppError> {
+    let items: Vec<crate::database::EntryCatalogMetaInput> = items
+        .into_iter()
+        .map(|item| crate::database::EntryCatalogMetaInput {
+            id: item.id,
+            provider_logo: item.provider_logo,
+            release_date: item.release_date,
+            model_meta_zh: item.model_meta_zh,
+            model_meta_en: item.model_meta_en,
+        })
+        .collect();
+    state.db.backfill_entry_catalog_meta(&items)
 }
 
 #[tauri::command]

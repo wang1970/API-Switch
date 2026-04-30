@@ -22,11 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings, backfillEntryCatalogMeta } from "@/lib/api";
 import type { ApiEntry, Channel, ModelSortMode } from "@/types";
 import { cn, formatResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
-import { getCatalogModel, getCatalogProviderLogo, formatTokenCount, type CatalogModel } from "@/lib/modelsCatalog";
+import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from "@/lib/modelsCatalog";
 import {
   DndContext,
   closestCenter,
@@ -57,36 +57,6 @@ function StatusDot({ state }: { state: string }) {
   );
 }
 
-function modalityLabel(value: string, t: (key: string) => string) {
-  switch (value) {
-    case "text": return t("apiPool.modelMeta.modalities.text");
-    case "image": return t("apiPool.modelMeta.modalities.image");
-    case "pdf": return t("apiPool.modelMeta.modalities.pdf");
-    case "audio": return t("apiPool.modelMeta.modalities.audio");
-    case "video": return t("apiPool.modelMeta.modalities.video");
-    default: return value;
-  }
-}
-
-function getFeatureLabels(model: CatalogModel, t: (key: string) => string) {
-  const labels: string[] = [];
-  const inputs = model.modalities?.input || [];
-  const outputs = model.modalities?.output || [];
-
-  if (outputs.includes("image")) labels.push(t("apiPool.modelMeta.features.imageGeneration"));
-  if (inputs.includes("image")) labels.push(t("apiPool.modelMeta.features.imageUnderstanding"));
-  if (inputs.includes("audio") || outputs.includes("audio")) labels.push(t("apiPool.modelMeta.features.audio"));
-  if (inputs.includes("video") || outputs.includes("video")) labels.push(t("apiPool.modelMeta.features.video"));
-  if (inputs.includes("pdf") || outputs.includes("pdf")) labels.push(t("apiPool.modelMeta.features.pdf"));
-  if (model.reasoning) labels.push(t("apiPool.modelMeta.features.reasoning"));
-  if (model.interleaved) labels.push(t("apiPool.modelMeta.features.interleaved"));
-  if (model.tool_call) labels.push(t("apiPool.modelMeta.features.toolCall"));
-  if (model.structured_output) labels.push(t("apiPool.modelMeta.features.structuredOutput"));
-  if (model.attachment) labels.push(t("apiPool.modelMeta.features.attachment"));
-  if (model.temperature) labels.push(t("apiPool.modelMeta.features.temperature"));
-  return labels;
-}
-
 function shortReleaseDate(value?: string) {
   if (!value) return null;
   const match = value.match(/^(\d{4})-(\d{2})/);
@@ -96,13 +66,118 @@ function shortReleaseDate(value?: string) {
   return value;
 }
 
-function ModelMetaBlock({ releaseDate, context, output, features }: {
+type CatalogDisplayMeta = {
+  logo: string;
+  releaseDate: string;
+  context: string;
+  output: string;
+  features: string[];
+  modelMetaZh: string;
+  modelMetaEn: string;
+};
+
+function buildCatalogDisplayMeta(modelId: string): CatalogDisplayMeta {
+  const model = getCatalogModel(modelId);
+  if (!model) {
+    return {
+      logo: getCatalogProviderLogo(modelId),
+      releaseDate: "",
+      context: "",
+      output: "",
+      features: [],
+      modelMetaZh: "",
+      modelMetaEn: "",
+    };
+  }
+
+  const inputs = model.modalities?.input || [];
+  const outputs = model.modalities?.output || [];
+  const features: string[] = [];
+  if (outputs.includes("image")) features.push("imageGeneration");
+  if (inputs.includes("image")) features.push("imageUnderstanding");
+  if (inputs.includes("audio") || outputs.includes("audio")) features.push("audio");
+  if (inputs.includes("video") || outputs.includes("video")) features.push("video");
+  if (inputs.includes("pdf") || outputs.includes("pdf")) features.push("pdf");
+  if (model.reasoning) features.push("reasoning");
+  if (model.interleaved) features.push("interleaved");
+  if (model.tool_call) features.push("toolCall");
+  if (model.structured_output) features.push("structuredOutput");
+  if (model.attachment) features.push("attachment");
+  if (model.temperature) features.push("temperature");
+
+  const releaseDate = shortReleaseDate(model.release_date) || "";
+  const context = formatTokenCount(model.limit?.context) || "";
+  const output = formatTokenCount(model.limit?.output) || "";
+  const zhFeatureLabels: Record<string, string> = {
+    imageGeneration: "生图",
+    imageUnderstanding: "识图",
+    audio: "音频",
+    video: "视频",
+    pdf: "PDF",
+    reasoning: "推理",
+    interleaved: "思维链",
+    toolCall: "工具调用",
+    structuredOutput: "结构输出",
+    attachment: "附件",
+    temperature: "温度",
+  };
+  const enFeatureLabels: Record<string, string> = {
+    imageGeneration: "Image Gen",
+    imageUnderstanding: "Vision",
+    audio: "Audio",
+    video: "Video",
+    pdf: "PDF",
+    reasoning: "Reasoning",
+    interleaved: "Reasoning Trace",
+    toolCall: "Tool Calling",
+    structuredOutput: "Struct Output",
+    attachment: "Attachment",
+    temperature: "Temperature",
+  };
+  const buildMeta = (labels: Record<string, string>, releaseLabel: string, contextLabel: string, outputLabel: string) => [
+    releaseDate ? `${releaseLabel}: ${releaseDate}` : null,
+    ...features.map(f => labels[f]).filter(Boolean),
+    context ? `${contextLabel}: ${context}` : null,
+    output ? `${outputLabel}: ${output}` : null,
+  ].filter(Boolean).join(" / ");
+
+  return {
+    logo: getCatalogProviderLogo(modelId),
+    releaseDate,
+    context,
+    output,
+    features,
+    modelMetaZh: buildMeta(zhFeatureLabels, "发布", "上下文", "输出"),
+    modelMetaEn: buildMeta(enFeatureLabels, "Release", "Context", "Output"),
+  };
+}
+
+function getEntryDisplayMeta(entry: ApiEntry, catalogMap: Map<string, CatalogDisplayMeta>): CatalogDisplayMeta {
+  const fallback = catalogMap.get(entry.model) || buildCatalogDisplayMeta(entry.model);
+  return {
+    logo: entry.provider_logo || fallback.logo || "/logo/custom.svg",
+    releaseDate: entry.release_date || fallback.releaseDate || "",
+    context: fallback.context,
+    output: fallback.output,
+    features: fallback.features,
+    modelMetaZh: entry.model_meta_zh || fallback.modelMetaZh || "",
+    modelMetaEn: entry.model_meta_en || fallback.modelMetaEn || "",
+  };
+}
+
+function ModelMetaBlock({ metaZh, metaEn, releaseDate, context, output, features }: {
+  metaZh?: string;
+  metaEn?: string;
   releaseDate?: string;
   context?: string;
   output?: string;
   features: string[];
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const storedMeta = i18n.language?.startsWith("zh") ? metaZh : metaEn;
+  if (storedMeta) {
+    return <div className="mt-1 text-xs text-muted-foreground truncate">{storedMeta}</div>;
+  }
 
   if (!releaseDate && features.length === 0 && !context && !output) return null;
 
@@ -151,6 +226,8 @@ function CardBody({
   catalogContext,
   catalogOutput,
   catalogFeatures,
+  modelMetaZh,
+  modelMetaEn,
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
@@ -163,6 +240,8 @@ function CardBody({
   catalogContext?: string;
   catalogOutput?: string;
   catalogFeatures: string[];
+  modelMetaZh?: string;
+  modelMetaEn?: string;
 }) {
   const { t } = useTranslation();
   const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
@@ -203,6 +282,8 @@ function CardBody({
           ) : null}
         </div>
         <ModelMetaBlock
+          metaZh={modelMetaZh}
+          metaEn={modelMetaEn}
           releaseDate={catalogReleaseDate}
           context={catalogContext}
           output={catalogOutput}
@@ -240,6 +321,8 @@ function SortablePoolEntryCard(props: {
   catalogContext?: string;
   catalogOutput?: string;
   catalogFeatures: string[];
+  modelMetaZh?: string;
+  modelMetaEn?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.entry.id });
 
@@ -274,6 +357,8 @@ function PoolEntryCard(props: {
   catalogContext?: string;
   catalogOutput?: string;
   catalogFeatures: string[];
+  modelMetaZh?: string;
+  modelMetaEn?: string;
 }) {
   return (
     <Card className={cn("transition-opacity", !props.entry.enabled && "opacity-60")}>
@@ -326,48 +411,59 @@ export function ApiPoolPage() {
     queryFn: listChannels,
   });
 
-  // Pre-compute catalog info ONCE per entries change — cards read from this Map
+  // Pre-compute catalog fallback only for entries missing DB metadata.
   const catalogMap = useMemo(() => {
-    const map = new Map<string, { logo: string; releaseDate: string; context: string; output: string; features: string[] }>();
+    const map = new Map<string, CatalogDisplayMeta>();
     for (const entry of (entries || [])) {
-      if (!map.has(entry.model)) {
-        const model = getCatalogModel(entry.model);
-        if (model) {
-          const inputs = model.modalities?.input || [];
-          const outputs = model.modalities?.output || [];
-          const features: string[] = [];
-          if (outputs.includes("image")) features.push("imageGeneration");
-          if (inputs.includes("image")) features.push("imageUnderstanding");
-          if (inputs.includes("audio") || outputs.includes("audio")) features.push("audio");
-          if (inputs.includes("video") || outputs.includes("video")) features.push("video");
-          if (inputs.includes("pdf") || outputs.includes("pdf")) features.push("pdf");
-          if (model.reasoning) features.push("reasoning");
-          if (model.interleaved) features.push("interleaved");
-          if (model.tool_call) features.push("toolCall");
-          if (model.structured_output) features.push("structuredOutput");
-          if (model.attachment) features.push("attachment");
-          if (model.temperature) features.push("temperature");
-
-          map.set(entry.model, {
-            logo: getCatalogProviderLogo(entry.model),
-            releaseDate: shortReleaseDate(model.release_date) || "",
-            context: formatTokenCount(model.limit?.context) || "",
-            output: formatTokenCount(model.limit?.output) || "",
-            features,
-          });
-        }
+      const needsFallback = !entry.provider_logo || !entry.release_date || !entry.model_meta_zh || !entry.model_meta_en;
+      if (needsFallback && !map.has(entry.model)) {
+        map.set(entry.model, buildCatalogDisplayMeta(entry.model));
       }
     }
     return map;
   }, [entries]);
+
+  useEffect(() => {
+    const missing = (entries || [])
+      .map((entry) => {
+        const meta = catalogMap.get(entry.model);
+        if (!meta) return null;
+        const next = {
+          id: entry.id,
+          provider_logo: entry.provider_logo || meta.logo,
+          release_date: entry.release_date || meta.releaseDate,
+          model_meta_zh: entry.model_meta_zh || meta.modelMetaZh,
+          model_meta_en: entry.model_meta_en || meta.modelMetaEn,
+        };
+        const changed =
+          next.provider_logo !== (entry.provider_logo || "") ||
+          next.release_date !== (entry.release_date || "") ||
+          next.model_meta_zh !== (entry.model_meta_zh || "") ||
+          next.model_meta_en !== (entry.model_meta_en || "");
+        return changed ? next : null;
+      })
+      .filter(Boolean) as Array<{
+        id: string;
+        provider_logo: string;
+        release_date: string;
+        model_meta_zh: string;
+        model_meta_en: string;
+      }>;
+
+    if (missing.length === 0) return;
+
+    backfillEntryCatalogMeta(missing).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+    });
+  }, [entries, catalogMap, queryClient]);
 
   const sorted = useMemo(() => {
     const list = [...(entries || [])];
 
     if (sortMode === "latest") {
       return list.sort((a, b) => {
-        const dateA = catalogMap.get(a.model)?.releaseDate || "";
-        const dateB = catalogMap.get(b.model)?.releaseDate || "";
+        const dateA = a.release_date || catalogMap.get(a.model)?.releaseDate || "";
+        const dateB = b.release_date || catalogMap.get(b.model)?.releaseDate || "";
         return dateB.localeCompare(dateA);
       });
     }
@@ -647,43 +743,53 @@ export function ApiPoolPage() {
                 strategy={verticalListSortingStrategy}
               >
                 <div className="flex flex-col gap-3">
-                  {filteredEntries.map((entry) => (
-                    <SortablePoolEntryCard
-                      key={entry.id}
-                      entry={entry}
-                      onTest={setTestEntry}
-                      onDelete={setDeleteTarget}
-                      onToggleIntent={handleToggleIntent}
-                      testingEntryIds={testingEntryIds}
-                      testResult={testResults[entry.id]}
-                      catalogLogo={catalogMap.get(entry.model)?.logo || "/logo/custom.svg"}
-                      catalogReleaseDate={catalogMap.get(entry.model)?.releaseDate}
-                      catalogContext={catalogMap.get(entry.model)?.context}
-                      catalogOutput={catalogMap.get(entry.model)?.output}
-                      catalogFeatures={catalogMap.get(entry.model)?.features || []}
-                    />
-                  ))}
+                  {filteredEntries.map((entry) => {
+                    const meta = getEntryDisplayMeta(entry, catalogMap);
+                    return (
+                      <SortablePoolEntryCard
+                        key={entry.id}
+                        entry={entry}
+                        onTest={setTestEntry}
+                        onDelete={setDeleteTarget}
+                        onToggleIntent={handleToggleIntent}
+                        testingEntryIds={testingEntryIds}
+                        testResult={testResults[entry.id]}
+                        catalogLogo={meta.logo}
+                        catalogReleaseDate={meta.releaseDate}
+                        catalogContext={meta.context}
+                        catalogOutput={meta.output}
+                        catalogFeatures={meta.features}
+                        modelMetaZh={meta.modelMetaZh}
+                        modelMetaEn={meta.modelMetaEn}
+                      />
+                    );
+                  })}
                 </div>
               </SortableContext>
             </DndContext>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredEntries.map((entry) => (
-                <PoolEntryCard
-                  key={entry.id}
-                  entry={entry}
-                  onTest={setTestEntry}
-                  onDelete={setDeleteTarget}
-                  onToggleIntent={handleToggleIntent}
-                  testingEntryIds={testingEntryIds}
-                  testResult={testResults[entry.id]}
-                  catalogLogo={catalogMap.get(entry.model)?.logo || "/logo/custom.svg"}
-                  catalogReleaseDate={catalogMap.get(entry.model)?.releaseDate}
-                  catalogContext={catalogMap.get(entry.model)?.context}
-                  catalogOutput={catalogMap.get(entry.model)?.output}
-                  catalogFeatures={catalogMap.get(entry.model)?.features || []}
-                />
-              ))}
+              {filteredEntries.map((entry) => {
+                const meta = getEntryDisplayMeta(entry, catalogMap);
+                return (
+                  <PoolEntryCard
+                    key={entry.id}
+                    entry={entry}
+                    onTest={setTestEntry}
+                    onDelete={setDeleteTarget}
+                    onToggleIntent={handleToggleIntent}
+                    testingEntryIds={testingEntryIds}
+                    testResult={testResults[entry.id]}
+                    catalogLogo={meta.logo}
+                    catalogReleaseDate={meta.releaseDate}
+                    catalogContext={meta.context}
+                    catalogOutput={meta.output}
+                    catalogFeatures={meta.features}
+                    modelMetaZh={meta.modelMetaZh}
+                    modelMetaEn={meta.modelMetaEn}
+                  />
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -738,11 +844,18 @@ function AddApiDialog({
   const channelOptions = channels.filter((c) => c.enabled);
 
   const createMutation = useMutation({
-    mutationFn: () => createEntry({
-      channel_id: channelId,
-      model: modelName,
-      display_name: displayName || undefined,
-    }),
+    mutationFn: () => {
+      const meta = buildCatalogDisplayMeta(modelName);
+      return createEntry({
+        channel_id: channelId,
+        model: modelName,
+        display_name: displayName || undefined,
+        provider_logo: meta.logo,
+        release_date: meta.releaseDate,
+        model_meta_zh: meta.modelMetaZh,
+        model_meta_en: meta.modelMetaEn,
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       onOpenChange(false);

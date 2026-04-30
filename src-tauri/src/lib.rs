@@ -114,6 +114,7 @@ pub fn run() {
             commands::pool::reorder_entries,
             commands::pool::delete_entry,
             commands::pool::create_entry,
+            commands::pool::backfill_entry_catalog_meta,
             commands::pool::test_entry_latency,
             commands::pool::update_entry_response_ms,
             commands::token::list_access_keys,
@@ -144,9 +145,15 @@ pub fn run() {
 }
 
 pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let entries = app.state::<AppState>()
+    let app_state = app.state::<AppState>();
+    let mut entries = app_state
         .db.get_enabled_entries_for_routing()
         .unwrap_or_default();
+    let sort_mode = app_state
+        .db.get_settings()
+        .map(|settings| settings.default_sort_mode)
+        .unwrap_or_else(|_| "custom".to_string());
+    proxy::apply_sort_mode(&mut entries, &sort_mode);
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 
     // 1. Show main window (top of menu)

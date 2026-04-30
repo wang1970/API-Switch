@@ -84,14 +84,22 @@ export interface ApiEntry {
   channel_api_type?: ApiType;
   // Model provider (e.g. "openai", "anthropic", "google")
   owned_by?: string;
-  // Response time from speed test (e.g. "1.2s", "350ms")
+  // Response time from speed test (milliseconds string, or "X")
   response_ms?: string | null;
+  provider_logo?: string | null;
+  release_date?: string | null;
+  model_meta_zh?: string | null;
+  model_meta_en?: string | null;
 }
 
 export interface CreateEntryParams {
   channel_id: string;
   model: string;
   display_name?: string;
+  provider_logo?: string;
+  release_date?: string;
+  model_meta_zh?: string;
+  model_meta_en?: string;
 }
 
 export type CircuitState = "closed" | "open" | "half_open";
