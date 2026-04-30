@@ -691,8 +691,8 @@ export function ApiPoolPage() {
         </div>
       </div>
 
-      <div className="sticky top-0 z-10 bg-background pt-1 pb-0 mt-3">
-        <div className="relative mb-4">
+      <div className="sticky top-0 z-10 bg-background pt-1 pb-1">
+        <div className="relative">
           <Input
             className="flex-1 pr-8"
             placeholder={t("apiPool.search")}
@@ -709,20 +709,20 @@ export function ApiPoolPage() {
             </button>
           ) : null}
         </div>
-        <div className="flex items-center justify-end mt-1">
-          <div className="flex items-center rounded-md border">
-            {(["custom", "latest", "fastest"] as ModelSortMode[]).map((mode) => (
-              <Button
-                key={mode}
-                size="sm"
-                variant={sortMode === mode ? "default" : "ghost"}
-                className="h-7 rounded-none first:rounded-l-md last:rounded-r-md px-2.5 text-xs"
-                onClick={() => handleSortModeChange(mode)}
-              >
-                {t(`apiPool.sort.${mode}`)}
-              </Button>
-            ))}
-          </div>
+      </div>
+      <div className="flex items-center justify-end mt-2 mb-1">
+        <div className="flex items-center rounded-md border">
+          {(["custom", "latest", "fastest"] as ModelSortMode[]).map((mode) => (
+            <Button
+              key={mode}
+              size="sm"
+              variant={sortMode === mode ? "default" : "ghost"}
+              className="h-7 rounded-none first:rounded-l-md last:rounded-r-md px-2.5 text-xs"
+              onClick={() => handleSortModeChange(mode)}
+            >
+              {t(`apiPool.sort.${mode}`)}
+            </Button>
+          ))}
         </div>
       </div>
 
