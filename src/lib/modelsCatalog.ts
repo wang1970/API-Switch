@@ -144,17 +144,29 @@ for (const provider of Object.values(catalog)) {
   }
 }
 
+const catalogModelCache = new Map<string, CatalogModel | null>();
+
 export function getCatalogModel(modelId: string): CatalogModel | null {
   const key = modelId.trim().toLowerCase();
   if (!key) return null;
 
+  if (catalogModelCache.has(key)) {
+    return catalogModelCache.get(key)!;
+  }
+
   const direct = modelIndex.get(key);
-  if (direct) return direct;
+  if (direct) {
+    catalogModelCache.set(key, direct);
+    return direct;
+  }
 
   let best: { score: number; model: CatalogModel } | null = null;
   for (const variant of buildKeyVariants(key)) {
     const directVariant = modelIndex.get(variant);
-    if (directVariant) return directVariant;
+    if (directVariant) {
+      catalogModelCache.set(key, directVariant);
+      return directVariant;
+    }
     for (const entry of modelEntries) {
       const score = similarityScore(variant, entry.normalized);
       if (score <= 0) continue;
@@ -164,7 +176,9 @@ export function getCatalogModel(modelId: string): CatalogModel | null {
     }
   }
 
-  return best?.model ?? null;
+  const result = best?.model ?? null;
+  catalogModelCache.set(key, result);
+  return result;
 }
 
 const brandRules: [RegExp, string][] = [
