@@ -22,6 +22,11 @@
     "search": "Search by model / display name / channel",
     "cooldownInline": "(cooldown {{time}})",
     "filterChannel": "Filter Channel",
+    "sort": {
+      "latest": "Latest",
+      "fastest": "Fastest",
+      "custom": "Custom"
+    },
     "cooldownRemaining": "Cooling down, {{time}} remaining",
     "channel": "Channel",
     "model": "Model",
@@ -282,7 +287,10 @@
       "theme": "Theme",
       "themeLight": "Light",
       "themeDark": "Dark",
-      "themeSystem": "System"
+      "themeSystem": "System",
+      "defaultSortMode": "Default Sort Mode",
+      "defaultSortModeDesc": "Default model sort order for the API Management page",
+      "currentVersion": "Version"
     },
     "guide": {
       "title": "Usage Guide",

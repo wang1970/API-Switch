@@ -17,6 +17,7 @@ pub struct AppSettings {
     pub autostart: bool,
     pub start_minimized: bool,
     pub show_guide: bool,
+    pub default_sort_mode: String,
 }
 
 impl Default for AppSettings {
@@ -35,6 +36,7 @@ impl Default for AppSettings {
             autostart: false,
             start_minimized: false,
             show_guide: true,
+            default_sort_mode: "custom".to_string(),
         }
     }
 }
@@ -92,6 +94,9 @@ impl Database {
         if let Some(v) = kv.get("show_guide") {
             settings.show_guide = v == "1";
         }
+        if let Some(v) = kv.get("default_sort_mode") {
+            settings.default_sort_mode = v.clone();
+        }
 
         Ok(settings)
     }
@@ -132,6 +137,7 @@ impl Database {
                 if updates.start_minimized { "1" } else { "0" },
             ),
             ("show_guide", if updates.show_guide { "1" } else { "0" }),
+            ("default_sort_mode", &updates.default_sort_mode),
         ];
 
         for (key, value) in kv {

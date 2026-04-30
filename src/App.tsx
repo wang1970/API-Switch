@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   Layers,
   Route,
@@ -63,6 +64,14 @@ export default function App() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [updateChecked, setUpdateChecked] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{ current: string; latest: string; url: string } | null>(null);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then((v) => {
+      setAppVersion(v);
+      document.title = `API-Switch - ${v}`;
+    });
+  }, []);
 
   // Show guide only after settings confirm it should be shown; check updates if guide won't show
   useEffect(() => {

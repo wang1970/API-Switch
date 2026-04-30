@@ -3,14 +3,13 @@ use crate::database::ApiEntry;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-/// Parse response_ms field (stored as seconds string, e.g. "1") to milliseconds.
+/// Parse response_ms field (stored as milliseconds string, e.g. "1234") to i64.
 /// Returns None if missing or unparseable.
 fn parse_response_ms(entry: &ApiEntry) -> Option<i64> {
     entry
         .response_ms
         .as_deref()
-        .and_then(|s| s.parse::<f64>().ok())
-        .map(|secs| (secs * 1000.0) as i64)
+        .and_then(|s| s.parse::<i64>().ok())
 }
 
 /// Sort entries by response time ascending; entries without measurement go last.

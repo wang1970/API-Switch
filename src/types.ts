@@ -2,6 +2,10 @@
 // API Switch - Type Definitions
 // ============================================================
 
+// --- Sort Mode ---
+
+export type ModelSortMode = "latest" | "fastest" | "custom";
+
 // --- Channel ---
 
 export interface Channel {
@@ -209,6 +213,7 @@ export interface AppSettings {
   autostart: boolean;
   start_minimized: boolean;
   show_guide: boolean;
+  default_sort_mode: ModelSortMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -225,6 +230,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autostart: false,
   start_minimized: false,
   show_guide: true,
+  default_sort_mode: "custom",
 };
 
 // --- Proxy ---

@@ -162,11 +162,7 @@ pub async fn test_entry_latency(
     // Consume body to ensure complete response
     let _ = response.bytes().await;
 
-    let response_ms = if latency_ms >= 1000 {
-        format!("{:.1}s", latency_ms as f64 / 1000.0)
-    } else {
-        format!("{}ms", latency_ms)
-    };
+    let response_ms = latency_ms.to_string();
 
     db.update_entry_response_ms(&entry_id, &response_ms)?;
 

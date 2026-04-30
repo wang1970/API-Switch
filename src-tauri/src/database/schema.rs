@@ -141,6 +141,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("show_guide", "1"),
         ("autostart", "0"),
         ("start_minimized", "0"),
+        ("default_sort_mode", "custom"),
     ];
 
     for (key, value) in defaults {

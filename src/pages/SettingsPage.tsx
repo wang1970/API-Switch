@@ -14,7 +14,9 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { getSettings, updateSettings, getProxyStatus, startProxy, stopProxy } from "@/lib/api";
 import { toast } from "sonner";
-import { DEFAULT_SETTINGS } from "@/types";
+import { DEFAULT_SETTINGS, type ModelSortMode } from "@/types";
+
+const APP_VERSION = "0.4.7";
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
@@ -211,6 +213,32 @@ export function SettingsPage() {
                 <SelectItem value="system">{t("settings.general.themeSystem")}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>{t("settings.general.defaultSortMode")}</Label>
+              <p className="text-xs text-muted-foreground">{t("settings.general.defaultSortModeDesc")}</p>
+            </div>
+            <Select
+              value={s.default_sort_mode}
+              onValueChange={(v: ModelSortMode) => {
+                update("default_sort_mode", v);
+                localStorage.setItem("api-switch-sort-mode", v);
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="custom">{t("apiPool.sort.custom")}</SelectItem>
+                <SelectItem value="latest">{t("apiPool.sort.latest")}</SelectItem>
+                <SelectItem value="fastest">{t("apiPool.sort.fastest")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t">
+            <Label className="text-muted-foreground">{t("settings.general.currentVersion")}</Label>
+            <span className="text-sm font-mono text-muted-foreground">{APP_VERSION}</span>
           </div>
         </CardContent>
       </Card>

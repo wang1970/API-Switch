@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn, formatResponseMs } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -94,9 +94,7 @@ export function ChannelPage() {
       try {
         const probe = await probeUrl(ch.base_url);
         if (probe.reachable && probe.latency_ms > 0) {
-          const secs = probe.latency_ms >= 1000
-            ? `${(probe.latency_ms / 1000).toFixed(1)}s`
-            : `${probe.latency_ms}ms`;
+          const secs = String(probe.latency_ms);
           await updateChannelResponseMs(ch.id, secs);
           results[ch.id] = secs;
         } else {
@@ -353,9 +351,9 @@ function ChannelRow({
           ) : testResults?.[channel.id] === "X" ? (
             <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
           ) : testResults?.[channel.id] ? (
-            <span className="text-green-600">{testResults[channel.id]}</span>
+            <span className="text-green-600">{formatResponseMs(testResults[channel.id])}</span>
           ) : channel.response_ms ? (
-            <span className="text-green-600">{channel.response_ms}</span>
+            <span className="text-green-600">{formatResponseMs(channel.response_ms)}</span>
           ) : (
             <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
           )}
@@ -687,10 +685,8 @@ function ChannelEditorDialog({
 
       // 2. Save URL probe latency as response time
       if (urlProbe?.reachable && urlProbe.latency_ms > 0) {
-        const secs = urlProbe.latency_ms >= 1000
-          ? `${(urlProbe.latency_ms / 1000).toFixed(1)}s`
-          : `${urlProbe.latency_ms}ms`;
-        await updateChannelResponseMs(channelId, secs);
+        const ms = String(urlProbe.latency_ms);
+        await updateChannelResponseMs(channelId, ms);
       }
 
       // 3. Sync selected models to pool (always sync to handle deletions)
