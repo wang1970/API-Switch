@@ -17,26 +17,28 @@ fn sort_by_latency(entries: &mut [ApiEntry]) {
     entries.sort_by_key(|e| parse_response_ms(e).unwrap_or(i64::MAX));
 }
 
+/// Sort entries by sort_index ascending (user's custom order).
+fn sort_by_index(entries: &mut [ApiEntry]) {
+    entries.sort_by_key(|e| e.sort_index);
+}
+
 /// Resolve which entries to try for a given model request.
 /// Returns an ordered list of entries to attempt (failover in order).
 ///
 /// Rules:
-/// - `auto`: use enabled entries only (auto-select pool), sorted by latency.
-/// - exact model match: try matched enabled entries first (sorted by latency),
+/// - `auto`: use enabled entries only (auto-select pool), sorted by `sort_mode`.
+/// - exact model match: try matched enabled entries first (sorted by `sort_mode`),
 ///   then fall back to enabled entries as auto-fallback to prevent disconnection.
 /// - wrong model name: fall back to enabled entries (AUTO behavior).
-///
-/// This intentionally follows NEW-API's enabled-channel pool behavior: disabled
-/// entries must never be selected by the formal proxy route. Testing disabled
-/// entries is handled by the test-chat command/path only.
 pub async fn resolve(
     model: &str,
     enabled_entries: &[ApiEntry],
     circuit_breakers: &RwLock<HashMap<String, CircuitBreaker>>,
+    sort_mode: &str,
 ) -> Vec<ApiEntry> {
     let breakers = circuit_breakers.read().await;
 
-    // Helper: filter out circuit-open entries
+    // Helper: filter out circuit-open entries, then sort by sort_mode
     let filter_available = |entries: &[ApiEntry]| -> Vec<ApiEntry> {
         let mut available: Vec<ApiEntry> = entries
             .iter()
@@ -49,17 +51,16 @@ pub async fn resolve(
             })
             .cloned()
             .collect();
-        sort_by_latency(&mut available);
+        apply_sort_mode(&mut available, sort_mode);
         available
     };
 
     if model.is_empty() || model.eq_ignore_ascii_case("auto") {
-        // AUTO: only enabled + available entries, sorted by latency
+        // AUTO: only enabled + available entries, sorted by sort_mode
         return filter_available(enabled_entries);
     }
 
-    // Exact model match from ENABLED entries only. This mirrors NEW-API's
-    // channel cache, which excludes disabled channels from formal routing.
+    // Exact model match from ENABLED entries only.
     let mut enabled_available = filter_available(enabled_entries);
     let mut matched: Vec<ApiEntry> = enabled_available
         .iter()
@@ -72,9 +73,9 @@ pub async fn resolve(
         return enabled_available;
     }
 
-    // Exact match found: try matched entries first (sorted by latency),
+    // Exact match found: try matched entries first,
     // then append remaining enabled entries as auto-fallback.
-    sort_by_latency(&mut matched);
+    apply_sort_mode(&mut matched, sort_mode);
     let mut result = matched;
     for entry in &enabled_available {
         if !result.iter().any(|e| e.id == entry.id) {
@@ -82,6 +83,14 @@ pub async fn resolve(
         }
     }
     result
+}
+
+/// Apply sort mode to entries: "custom" → sort_index, others → latency.
+fn apply_sort_mode(entries: &mut [ApiEntry], sort_mode: &str) {
+    match sort_mode {
+        "custom" => sort_by_index(entries),
+        _ => sort_by_latency(entries), // "fastest", "latest" both use latency
+    }
 }
 
 #[cfg(test)]
@@ -116,7 +125,7 @@ mod tests {
             entry("third", "gemini-pro", true, 2),
         ];
 
-        let resolved = resolve("auto", &enabled, &breakers).await;
+        let resolved = resolve("auto", &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
     }
@@ -129,7 +138,7 @@ mod tests {
             entry("fallback", "claude-3", true, 1),
         ];
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match", "fallback"]);
     }
@@ -139,7 +148,7 @@ mod tests {
         let breakers = RwLock::new(HashMap::new());
         let enabled = vec![entry("fallback", "claude-3", true, 1)];
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "fallback");
@@ -159,7 +168,7 @@ mod tests {
             guard.insert("open".to_string(), cb);
         }
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers).await;
+        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "fallback");
