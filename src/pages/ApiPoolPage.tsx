@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings } from "@/lib/api";
 import type { ApiEntry, Channel, ModelSortMode } from "@/types";
 import { cn, formatResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
@@ -479,7 +479,10 @@ export function ApiPoolPage() {
     setSortMode(mode);
     setLocalOrder(null);
     localStorage.setItem("api-switch-sort-mode", mode);
-  }, []);
+    updateSettings({ default_sort_mode: mode } as any).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    });
+  }, [queryClient]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     if (sortMode !== "custom") return;
