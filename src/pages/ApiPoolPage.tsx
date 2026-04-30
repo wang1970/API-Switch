@@ -96,16 +96,16 @@ function shortReleaseDate(value?: string) {
   return value;
 }
 
-function ModelMetaBlock({ modelId }: { modelId: string }) {
+function ModelMetaBlock({ releaseDate, context, output, features }: {
+  releaseDate?: string;
+  context?: string;
+  output?: string;
+  features: string[];
+}) {
   const { t } = useTranslation();
-  const model = getCatalogModel(modelId);
 
-  if (!model) return null;
+  if (!releaseDate && features.length === 0 && !context && !output) return null;
 
-  const features = getFeatureLabels(model, t);
-  const releaseDate = shortReleaseDate(model.release_date);
-  const context = formatTokenCount(model.limit?.context);
-  const output = formatTokenCount(model.limit?.output);
   const segments = [
     releaseDate ? `${t("apiPool.modelMeta.releaseDate")}: ${releaseDate}` : null,
     ...features,
@@ -146,6 +146,11 @@ function SortablePoolEntryCard({
   onToggleIntent,
   testingEntryIds,
   testResult,
+  catalogLogo,
+  catalogReleaseDate,
+  catalogContext,
+  catalogOutput,
+  catalogFeatures,
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
@@ -153,6 +158,11 @@ function SortablePoolEntryCard({
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   testingEntryIds?: Set<string>;
   testResult?: string;
+  catalogLogo: string;
+  catalogReleaseDate?: string;
+  catalogContext?: string;
+  catalogOutput?: string;
+  catalogFeatures: string[];
 }) {
   const { t } = useTranslation();
 
@@ -172,7 +182,6 @@ function SortablePoolEntryCard({
     opacity: isDragging ? 0.8 : undefined,
   };
   const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
-  const logoSrc = getCatalogProviderLogo(entry.model);
 
   return (
     <Card
@@ -191,7 +200,7 @@ function SortablePoolEntryCard({
         <div className="flex-1 min-w-0 overflow-hidden flex items-start gap-3">
           <div className="h-10 w-10 rounded-md bg-muted/40 border flex items-center justify-center shrink-0 mt-0.5">
             <img
-              src={logoSrc}
+              src={catalogLogo}
               alt="provider"
               className="h-6 w-6 shrink-0"
               onError={(e) => {
@@ -222,7 +231,15 @@ function SortablePoolEntryCard({
                 </span>
               ) : null}
             </div>
-            <ModelMetaBlock modelId={entry.model} />
+            <ModelMetaBlock
+              releaseDate={catalogReleaseDate}
+              context={catalogContext}
+              output={catalogOutput}
+              features={catalogFeatures.map(f => {
+                const key = `apiPool.modelMeta.features.${f}`;
+                return t(key);
+              })}
+            />
           </div>
         </div>
         <Button
@@ -296,6 +313,41 @@ export function ApiPoolPage() {
     queryKey: ["channels"],
     queryFn: listChannels,
   });
+
+  // Pre-compute catalog info ONCE per entries change — cards read from this Map
+  const catalogMap = useMemo(() => {
+    const map = new Map<string, { logo: string; releaseDate: string; context: string; output: string; features: string[] }>();
+    for (const entry of (entries || [])) {
+      if (!map.has(entry.model)) {
+        const model = getCatalogModel(entry.model);
+        if (model) {
+          const inputs = model.modalities?.input || [];
+          const outputs = model.modalities?.output || [];
+          const features: string[] = [];
+          if (outputs.includes("image")) features.push("imageGeneration");
+          if (inputs.includes("image")) features.push("imageUnderstanding");
+          if (inputs.includes("audio") || outputs.includes("audio")) features.push("audio");
+          if (inputs.includes("video") || outputs.includes("video")) features.push("video");
+          if (inputs.includes("pdf") || outputs.includes("pdf")) features.push("pdf");
+          if (model.reasoning) features.push("reasoning");
+          if (model.interleaved) features.push("interleaved");
+          if (model.tool_call) features.push("toolCall");
+          if (model.structured_output) features.push("structuredOutput");
+          if (model.attachment) features.push("attachment");
+          if (model.temperature) features.push("temperature");
+
+          map.set(entry.model, {
+            logo: getCatalogProviderLogo(entry.model),
+            releaseDate: shortReleaseDate(model.release_date) || "",
+            context: formatTokenCount(model.limit?.context) || "",
+            output: formatTokenCount(model.limit?.output) || "",
+            features,
+          });
+        }
+      }
+    }
+    return map;
+  }, [entries]);
 
   const sorted = [...(entries || [])].sort((a, b) => {
     if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
@@ -543,6 +595,11 @@ export function ApiPoolPage() {
                       onToggleIntent={handleToggleIntent}
                       testingEntryIds={testingEntryIds}
                       testResult={testResults[entry.id]}
+                      catalogLogo={catalogMap.get(entry.model)?.logo || "/logo/custom.svg"}
+                      catalogReleaseDate={catalogMap.get(entry.model)?.releaseDate}
+                      catalogContext={catalogMap.get(entry.model)?.context}
+                      catalogOutput={catalogMap.get(entry.model)?.output}
+                      catalogFeatures={catalogMap.get(entry.model)?.features || []}
                     />
                   ))}
                 </div>

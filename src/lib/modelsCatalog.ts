@@ -150,23 +150,15 @@ export function getCatalogModel(modelId: string): CatalogModel | null {
   const key = modelId.trim().toLowerCase();
   if (!key) return null;
 
-  if (catalogModelCache.has(key)) {
-    return catalogModelCache.get(key)!;
-  }
-
+  // 直接查 modelIndex（O(1)），命中则返回
   const direct = modelIndex.get(key);
-  if (direct) {
-    catalogModelCache.set(key, direct);
-    return direct;
-  }
+  if (direct) return direct;
 
+  // 未命中，遍历 modelEntries 做模糊匹配（慢路径）
   let best: { score: number; model: CatalogModel } | null = null;
   for (const variant of buildKeyVariants(key)) {
     const directVariant = modelIndex.get(variant);
-    if (directVariant) {
-      catalogModelCache.set(key, directVariant);
-      return directVariant;
-    }
+    if (directVariant) return directVariant;
     for (const entry of modelEntries) {
       const score = similarityScore(variant, entry.normalized);
       if (score <= 0) continue;
@@ -176,9 +168,7 @@ export function getCatalogModel(modelId: string): CatalogModel | null {
     }
   }
 
-  const result = best?.model ?? null;
-  catalogModelCache.set(key, result);
-  return result;
+  return best?.model ?? null;
 }
 
 const brandRules: [RegExp, string][] = [
