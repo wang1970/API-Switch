@@ -16,7 +16,7 @@ import { getSettings, updateSettings, getProxyStatus, startProxy, stopProxy } fr
 import { toast } from "sonner";
 import { DEFAULT_SETTINGS, type ModelSortMode } from "@/types";
 
-const APP_VERSION = "0.4.7";
+const APP_VERSION = "0.4.10";
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
