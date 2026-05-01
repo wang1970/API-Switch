@@ -2,7 +2,7 @@ use crate::database::AppSettings;
 use crate::error::AppError;
 use crate::AppState;
 use serde::Deserialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 const GITHUB_REPO: &str = "wang1970/API-Switch";
 
@@ -92,10 +92,25 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, App
     Ok(state.settings.read().await.clone())
 }
 
-#[tauri::command]
-pub async fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), AppError> {
-    state.db.update_settings(&settings)?;
+pub async fn refresh_settings_l1(state: &AppState) -> Result<AppSettings, AppError> {
+    // Settings writes are rare and settings are small.
+    // Keep DB as the source of truth: after every settings write,
+    // rebuild the L1 settings cache from DB instead of patching fields manually.
+    let settings = state.db.get_settings()?;
     *state.settings.write().await = settings.clone();
+    Ok(settings)
+}
+
+#[tauri::command]
+pub async fn update_settings(app: tauri::AppHandle, state: State<'_, AppState>, settings: AppSettings) -> Result<(), AppError> {
+    state.db.update_settings(&settings)?;
+    let settings = refresh_settings_l1(&state).await?;
     sync_autostart(&settings);
+    // Rebuild tray menu to reflect updated sort_mode
+    if let Ok(new_menu) = crate::build_tray_menu(&app) {
+        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::commands::config::refresh_settings_l1;
 use crate::error::AppError;
 use crate::proxy::ProxyStatus;
 use crate::AppState;
@@ -34,9 +35,9 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
 
     *proxy_guard = Some(server);
 
-    // Update config and L1 settings cache
+    // Update config, then rebuild L1 settings cache from DB.
     state.db.set_config_value("proxy_enabled", "1")?;
-    state.settings.write().await.proxy_enabled = true;
+    refresh_settings_l1(&state).await?;
 
     Ok(status)
 }
@@ -48,7 +49,7 @@ pub async fn stop_proxy(state: State<'_, AppState>) -> Result<(), AppError> {
         server.stop().await.map_err(|e| AppError::Proxy(e.to_string()))?;
     }
     state.db.set_config_value("proxy_enabled", "0")?;
-    state.settings.write().await.proxy_enabled = false;
+    refresh_settings_l1(&state).await?;
     Ok(())
 }
 

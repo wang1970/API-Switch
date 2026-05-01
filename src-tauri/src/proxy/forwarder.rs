@@ -11,6 +11,7 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures::Stream;
 use serde_json::Value;
+use std::error::Error;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -96,6 +97,69 @@ fn attempt_path_with_current(
     let mut attempts = prior_attempts.to_vec();
     push_attempt(&mut attempts, entry, status_code, success, error);
     attempt_path_json(&attempts)
+}
+
+fn sanitize_url_for_log(url: &str) -> String {
+    let mut sanitized = url.to_string();
+    for key in ["key", "api_key", "access_token", "token"] {
+        let marker = format!("{key}=");
+        let mut search_from = 0;
+        while let Some(pos) = sanitized[search_from..].find(&marker) {
+            let value_start = search_from + pos + marker.len();
+            let value_end = sanitized[value_start..]
+                .find('&')
+                .map(|offset| value_start + offset)
+                .unwrap_or(sanitized.len());
+            sanitized.replace_range(value_start..value_end, "***");
+            search_from = value_start + 3;
+        }
+    }
+    sanitized
+}
+
+fn reqwest_error_kind(err: &reqwest::Error) -> &'static str {
+    if err.is_timeout() {
+        "timeout"
+    } else if err.is_connect() {
+        "connect"
+    } else if err.is_request() {
+        "request"
+    } else if err.is_body() {
+        "body"
+    } else if err.is_decode() {
+        "decode"
+    } else if err.is_redirect() {
+        "redirect"
+    } else {
+        "unknown"
+    }
+}
+
+fn reqwest_source_chain(err: &reqwest::Error) -> Vec<String> {
+    let mut chain = Vec::new();
+    let mut source = err.source();
+    while let Some(current) = source {
+        chain.push(current.to_string());
+        source = current.source();
+    }
+    chain
+}
+
+fn format_reqwest_error(stage: &str, url: &str, err: reqwest::Error) -> String {
+    let detail = serde_json::json!({
+        "stage": stage,
+        "url": sanitize_url_for_log(url),
+        "kind": reqwest_error_kind(&err),
+        "is_timeout": err.is_timeout(),
+        "is_connect": err.is_connect(),
+        "is_request": err.is_request(),
+        "is_body": err.is_body(),
+        "is_decode": err.is_decode(),
+        "is_redirect": err.is_redirect(),
+        "source_chain": reqwest_source_chain(&err),
+        "message": err.to_string(),
+    });
+    format!("Request failed: {detail}")
 }
 
 /// Forward error with upstream status code (0 = connection failure).
@@ -226,7 +290,8 @@ pub async fn forward_with_retry(
                     Some(attempt_path.as_str()), None,
                 );
 
-                // Step 2: disable unrecoverable status codes, otherwise cool down.
+                // Step 2: disable unrecoverable status codes, otherwise cool down briefly.
+                // Connection failures report status=0 and must remain recoverable.
                 if status > 0 && should_disable_entry_for_status(&settings.circuit_disable_codes, status) {
                     disable_entry(state, entry).await;
                 } else {
@@ -285,7 +350,7 @@ async fn forward_single(
     let response = request
         .send()
         .await
-        .map_err(|e| (format!("Request failed: {e}"), 0))?;
+        .map_err(|e| (format_reqwest_error("send", &url, e), 0))?;
 
     let status = response.status().as_u16();
 
@@ -685,27 +750,26 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     let current_count = *count;
     drop(counts);
 
-    // If threshold reached, permanently disable the entry (enabled=false) with 24h cooldown
+    // Any failure is counted. Before threshold: temporary cooldown.
+    // At/above threshold: remove from AUTO and set a 24h long cooldown.
     if current_count >= threshold {
-        let one_day_later = chrono::Utc::now().timestamp() + 86400; // 24 hours
+        let one_day_later = chrono::Utc::now().timestamp() + 86400;
         let _ = state.db.set_entry_cooldown(&entry.id, Some(one_day_later));
         let _ = state.db.toggle_entry(&entry.id, false);
         let _ = state.app_handle.emit("entries-changed", ());
         refresh_tray(&state.app_handle);
 
-        // Clear circuit breaker state
         let mut breakers = state.circuit_breakers.write().await;
         breakers.remove(&entry.id);
 
         log::warn!(
-            "Entry {} permanently disabled after {} consecutive failures. Cooldown: 24h.",
+            "Entry {} disabled after {} consecutive failures. Long cooldown: 24h.",
             entry.id,
             current_count
         );
         return;
     }
 
-    // Otherwise, temporary cooldown
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
     let _ = state.app_handle.emit("entries-changed", ());
@@ -719,6 +783,14 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         .or_insert_with(|| CircuitBreaker::new(recovery_secs_u64));
     cb.set_recovery_secs(recovery_secs_u64);
     cb.record_failure(threshold);
+
+    log::warn!(
+        "Entry {} cooled down for {}s after recoverable failure count {}/{}.",
+        entry.id,
+        recovery_secs,
+        current_count,
+        threshold
+    );
 }
 
 fn spawn_record_circuit_success(
@@ -768,7 +840,8 @@ fn spawn_cool_down_entry(
         let current_count = *count;
         drop(counts);
 
-        // If threshold reached, permanently disable (enabled=false) with 24h cooldown
+        // Any failure is counted. Before threshold: temporary cooldown.
+        // At/above threshold: remove from AUTO and set a 24h long cooldown.
         if current_count >= threshold {
             let one_day_later = chrono::Utc::now().timestamp() + 86400;
             let _ = db.set_entry_cooldown(&entry_id, Some(one_day_later));
@@ -780,14 +853,13 @@ fn spawn_cool_down_entry(
             breakers.remove(&entry_id);
 
             log::warn!(
-                "Entry {} permanently disabled after {} consecutive failures. Cooldown: 24h.",
+                "Entry {} disabled after {} consecutive failures. Long cooldown: 24h.",
                 entry_id,
                 current_count
             );
             return;
         }
 
-        // Otherwise, temporary cooldown
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
         let _ = app_handle.emit("entries-changed", ());
@@ -795,10 +867,18 @@ fn spawn_cool_down_entry(
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers
-            .entry(entry_id)
+            .entry(entry_id.clone())
             .or_insert_with(|| CircuitBreaker::new(recovery_secs));
         cb.set_recovery_secs(recovery_secs);
         cb.record_failure(threshold);
+
+        log::warn!(
+            "Entry {} cooled down for {}s after recoverable failure count {}/{}.",
+            entry_id,
+            recovery_secs,
+            current_count,
+            threshold
+        );
     });
 }
 

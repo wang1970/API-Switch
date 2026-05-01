@@ -121,6 +121,7 @@ pub fn create_entry(
 
 #[tauri::command]
 pub fn backfill_entry_catalog_meta(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     items: Vec<EntryCatalogMetaUpdate>,
 ) -> Result<(), AppError> {
@@ -134,12 +135,14 @@ pub fn backfill_entry_catalog_meta(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    state.db.backfill_entry_catalog_meta(&items)
+    state.db.backfill_entry_catalog_meta(&items)?;
+    rebuild_tray(&app);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn test_entry_latency(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
 ) -> Result<TestResult, AppError> {
@@ -184,6 +187,7 @@ pub async fn test_entry_latency(
         Ok(response) => response,
         Err(_) => {
             let _ = db.update_entry_response_ms(&entry_id, "X");
+            rebuild_tray(&app);
             return Ok(TestResult {
                 status: "failed".to_string(),
                 response_ms: "X".to_string(),
@@ -196,6 +200,7 @@ pub async fn test_entry_latency(
     if !response.status().is_success() {
         let _error_body = response.text().await.unwrap_or_default();
         let _ = db.update_entry_response_ms(&entry_id, "X");
+        rebuild_tray(&app);
         return Ok(TestResult {
             status: "failed".to_string(),
             response_ms: "X".to_string(),
@@ -208,6 +213,7 @@ pub async fn test_entry_latency(
     let response_ms = latency_ms.to_string();
 
     db.update_entry_response_ms(&entry_id, &response_ms)?;
+    rebuild_tray(&app);
 
     Ok(TestResult {
         status: "ok".to_string(),
@@ -215,11 +221,22 @@ pub async fn test_entry_latency(
     })
 }
 
+fn rebuild_tray(app: &tauri::AppHandle) {
+    if let Ok(new_menu) = crate::build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+}
+
 #[tauri::command]
 pub fn update_entry_response_ms(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
     response_ms: String,
 ) -> Result<(), AppError> {
-    state.db.update_entry_response_ms(&entry_id, &response_ms)
+    state.db.update_entry_response_ms(&entry_id, &response_ms)?;
+    rebuild_tray(&app);
+    Ok(())
 }

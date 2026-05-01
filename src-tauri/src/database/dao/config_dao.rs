@@ -3,6 +3,7 @@ use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppSettings {
     pub proxy_enabled: bool,
     pub listen_port: i32,
@@ -26,7 +27,7 @@ impl Default for AppSettings {
             proxy_enabled: true,
             listen_port: 9090,
             access_key_required: false,
-            circuit_failure_threshold: 1,
+            circuit_failure_threshold: 3,
             circuit_recovery_secs: 300,
             locale: "zh".to_string(),
             theme: "light".to_string(),
