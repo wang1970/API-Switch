@@ -159,9 +159,15 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
         .unwrap_or_default();
     let sort_mode = app_state
         .settings
-        .blocking_read()
-        .default_sort_mode
-        .clone();
+        .try_read()
+        .map(|settings| settings.default_sort_mode.clone())
+        .unwrap_or_else(|_| {
+            app_state
+                .db
+                .get_settings()
+                .map(|settings| settings.default_sort_mode)
+                .unwrap_or_else(|_| "custom".to_string())
+        });
     proxy::apply_sort_mode(&mut entries, &sort_mode);
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 

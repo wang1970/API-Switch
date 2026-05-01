@@ -230,6 +230,11 @@ AUTO 路由 → 只选择 enabled=true 且未冷却的模型
     - **排序**: `latest` 模式前端和后端均直接用 `entry.release_date` 排序。
     - **AUTO 路由**: `custom` → sort_index，`fastest` → response_ms，`latest` → release_date。
     - **Tray Top5**: 跟随 `default_sort_mode` 排序。
+- [ ] **托盘菜单懒构建（Lazy Tray Build）**:
+    - **问题**: 当前托盘菜单在每个写操作（toggle/reorder/delete/create/update_settings/test_entry_latency/backfill/forwarder事件等）后都主动调用 `build_tray_menu` 重建，导致联动点分散在 ~10 处，维护成本高且容易遗漏。
+    - **方案**: 改为**惰性构建**——托盘右键弹出时（`on_menu_event` 或 Tauri 的 `MenuEvent`）才实时读 DB + L1 缓存构建菜单，去掉所有散落的 `build_tray_menu` 调用。
+    - **收益**: 零联动维护成本，菜单永远是最新数据，新增写操作无需关心托盘。
+    - **注意**: 需验证 Tauri v2 托盘菜单是否支持按需构建（而非启动时固定），以及延迟是否影响体验。
 - [ ] **Responses API 支持**: 新增 `/v1/responses` 路由，支持 OpenAI Responses API 格式（GPT-5.5 等新模型需要），包含请求/响应格式转换
 - [ ] **客户端断开精准检测**: 细分 client_gone / runtime cancellation / 其他 drop
 - [ ] **前端统一 Toast 错误提示**: 替代零散 `alert()` 和静默失败
