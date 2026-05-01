@@ -1,16 +1,16 @@
 use crate::database::AccessKey;
-use crate::database::Database;
 use crate::error::AppError;
+use crate::proxy::ProxyState;
 use axum::http::HeaderMap;
 
 /// Extract Access Key from request headers.
 /// If access_key_required is enabled, validate the key.
 /// Otherwise, just use it for identity tracking.
-pub fn extract_access_key(
+pub async fn extract_access_key(
     headers: &HeaderMap,
-    db: &Database,
+    state: &ProxyState,
 ) -> Result<Option<AccessKey>, AppError> {
-    let settings = db.get_settings()?;
+    let settings = state.settings.read().await.clone();
 
     let auth_header = headers
         .get("authorization")
@@ -27,7 +27,7 @@ pub fn extract_access_key(
     let key_str = key_str.filter(|k| !k.is_empty() && k != &"auto");
 
     let access_key = if let Some(key) = key_str {
-        db.find_access_key_by_key(key)?
+        state.db.find_access_key_by_key(key)?
     } else {
         None
     };

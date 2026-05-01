@@ -329,6 +329,7 @@ impl Database {
     /// Sync api_entries with selected_models of a channel:
     /// - Add entries for newly selected models
     /// - Remove entries for unselected models
+    /// - Refresh catalog metadata for selected models so UI/API/AUTO sorting stay in sync
     pub fn sync_entries_for_channel_with_meta(
         &self,
         channel_id: &str,
@@ -380,8 +381,7 @@ impl Database {
                 conn.execute(
                     "UPDATE api_entries
                      SET provider_logo = ?1, release_date = ?2, model_meta_zh = ?3, model_meta_en = ?4, updated_at = ?5
-                     WHERE channel_id = ?6 AND model = ?7
-                       AND (provider_logo = '' OR release_date = '' OR model_meta_zh = '' OR model_meta_en = '')",
+                     WHERE channel_id = ?6 AND model = ?7",
                     rusqlite::params![
                         meta.provider_logo,
                         meta.release_date,
@@ -407,14 +407,30 @@ impl Database {
         Ok(())
     }
 
-    /// Get all enabled entries for proxy routing (with channel info).
-    pub fn get_enabled_entries_for_routing(&self) -> Result<Vec<ApiEntry>, AppError> {
+    /// Get all API pool entries for listing models / direct model routing.
+    /// Includes disabled entries — entry.enabled only means "enter AUTO", not "usable".
+    pub fn get_entries_for_routing(&self) -> Result<Vec<ApiEntry>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let sql = format!("{ENTRY_SELECT_WITH_CHANNEL} ORDER BY e.sort_index, e.created_at");
+        let mut stmt = conn.prepare(&sql)?;
+
+        let entries = stmt
+            .query_map([], |row| row_to_entry(row, true))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(entries)
+    }
+
+    /// Get enabled entries from enabled channels for AUTO routing.
+    /// Only enabled + non-cooldown entries enter the AUTO pool.
+    pub fn get_enabled_entries_for_auto(&self) -> Result<Vec<ApiEntry>, AppError> {
         let conn = lock_conn!(self.conn);
         let sql = format!(
             "{ENTRY_SELECT_WITH_CHANNEL}
-             WHERE e.enabled = 1 AND c.enabled = 1
-               AND (e.cooldown_until IS NULL OR e.cooldown_until <= strftime('%s','now'))
-             ORDER BY e.sort_index, e.created_at"
+            WHERE e.enabled = 1 AND c.enabled = 1
+            AND (e.cooldown_until IS NULL OR e.cooldown_until <= strftime('%s','now'))
+            ORDER BY e.sort_index, e.created_at"
         );
         let mut stmt = conn.prepare(&sql)?;
 
@@ -425,6 +441,7 @@ impl Database {
 
         Ok(entries)
     }
+
 
     /// Get all entries (including disabled) with channel info. Used for test chat.
     pub fn get_entries_for_routing_all(&self) -> Result<Vec<ApiEntry>, AppError> {

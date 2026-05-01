@@ -1,12 +1,13 @@
 {
   "name": "api-switch",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "Personal API Management & Forwarding Center",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "pnpm tauri dev",
     "build": "pnpm tauri build",
+    "build:versioned": "pnpm tauri build && node scripts/versioned-build.cjs",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "tauri": "tauri",

@@ -1,6 +1,6 @@
 use super::circuit_breaker::CircuitBreaker;
 use super::handlers;
-use crate::database::Database;
+use crate::database::{AppSettings, Database};
 use axum::Router;
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ pub struct ProxyStatus {
 #[derive(Clone)]
 pub struct ProxyState {
     pub db: Arc<Database>,
+    pub settings: Arc<RwLock<AppSettings>>,
     pub circuit_breakers: Arc<RwLock<HashMap<String, CircuitBreaker>>>,
     pub failure_counts: Arc<RwLock<HashMap<String, u32>>>, // Entry ID -> consecutive failure count
     pub app_handle: tauri::AppHandle,
@@ -36,19 +37,26 @@ pub struct ProxyServer {
 }
 
 impl ProxyServer {
-    pub fn new(port: i32, db: Arc<Database>, app_handle: tauri::AppHandle, failure_counts: Arc<RwLock<HashMap<String, u32>>>) -> Self {
+    pub fn new(
+        port: i32,
+        db: Arc<Database>,
+        settings: Arc<RwLock<AppSettings>>,
+        app_handle: tauri::AppHandle,
+        failure_counts: Arc<RwLock<HashMap<String, u32>>>,
+    ) -> Self {
         let state = ProxyState {
             db,
+            settings,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             failure_counts,
             app_handle,
-        http_client: reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .read_timeout(Duration::from_secs(120))
-            .gzip(true)
-            .build()
-            .expect("failed to build proxy HTTP client"),
-    };
+            http_client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(15))
+                .read_timeout(Duration::from_secs(120))
+                .gzip(true)
+                .build()
+                .expect("failed to build proxy HTTP client"),
+        };
 
         Self {
             port,

@@ -2,7 +2,7 @@ use super::circuit_breaker::CircuitBreaker;
 use super::handlers::ProxyError;
 use super::protocol::get_adapter;
 use super::server::ProxyState;
-use crate::database::{AccessKey, ApiEntry, Database};
+use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
 use crate::{build_tray_menu, TRAY_ID};
 use tauri::Emitter;
 use axum::body::Body;
@@ -215,7 +215,7 @@ pub async fn forward_with_retry(
                 let elapsed = start.elapsed();
                 let latency_ms = elapsed.as_millis() as i64;
                 let log_status = if status > 0 { status as i32 } else { 502 };
-                let settings = state.db.get_settings().ok();
+                let settings = state.settings.read().await.clone();
                 push_attempt(&mut attempts, entry, log_status, false, Some(e.clone()));
                 let attempt_path = attempt_path_json(&attempts);
 
@@ -227,12 +227,7 @@ pub async fn forward_with_retry(
                 );
 
                 // Step 2: disable unrecoverable status codes, otherwise cool down.
-                if status > 0
-                    && settings
-                        .as_ref()
-                        .map(|s| should_disable_entry_for_status(&s.circuit_disable_codes, status))
-                        .unwrap_or(false)
-                {
+                if status > 0 && should_disable_entry_for_status(&settings.circuit_disable_codes, status) {
                     disable_entry(state, entry).await;
                 } else {
                     cool_down_entry(state, entry).await;
@@ -357,7 +352,7 @@ fn build_streaming_response(
     response: reqwest::Response,
     status_code: i32,
     needs_transform: bool,
-    adapter: Box<dyn super::protocol::ProtocolAdapter + Send>,
+    adapter: Box<dyn super::protocol::ProtocolAdapter + Send + Sync>,
     request_start: std::time::Instant,
     prior_attempts: Vec<AttemptInfo>,
 ) -> axum::response::Response {
@@ -379,7 +374,7 @@ fn build_streaming_response(
     let entry_id = entry.id.clone();
     let circuit_breakers = state.circuit_breakers.clone();
     let failure_counts = state.failure_counts.clone();
-    let settings_db = state.db.clone();
+    let settings_cache = state.settings.clone();
     let entries_app_handle = state.app_handle.clone();
     let success_circuit_breakers = state.circuit_breakers.clone();
     let success_failure_counts = state.failure_counts.clone();
@@ -437,7 +432,14 @@ fn build_streaming_response(
                         Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
                     );
                 });
-                spawn_cool_down_entry(circuit_breakers.clone(), failure_counts.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                spawn_cool_down_entry(
+                    circuit_breakers.clone(),
+                    failure_counts.clone(),
+                    settings_cache.clone(),
+                    db.clone(),
+                    entries_app_handle.clone(),
+                    entry_id.clone(),
+                );
             }
             return Poll::Ready(Some(Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -495,7 +497,14 @@ fn build_streaming_response(
                             Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
                         );
                     });
-                    spawn_cool_down_entry(circuit_breakers.clone(), failure_counts.clone(), settings_db.clone(), entries_app_handle.clone(), entry_id.clone());
+                    spawn_cool_down_entry(
+                        circuit_breakers.clone(),
+                        failure_counts.clone(),
+                        settings_cache.clone(),
+                        db.clone(),
+                        entries_app_handle.clone(),
+                        entry_id.clone(),
+                    );
                 }
                 Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
             }
@@ -521,7 +530,7 @@ fn build_streaming_response(
                     let scb = success_circuit_breakers.clone();
                     let sfc = success_failure_counts.clone();
                     let eid = entry_id.clone();
-                    let sdb = settings_db.clone();
+                    let sdb = settings_cache.clone();
                     let eah = entries_app_handle.clone();
                     tokio::spawn(async move {
                         log_usage(
@@ -530,7 +539,7 @@ fn build_streaming_response(
                             sc, true, None,
                             Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                         );
-                        spawn_record_circuit_success(scb, sfc, sdb, eah, eid);
+                        spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
                     });
                 }
                 Poll::Ready(None)
@@ -552,7 +561,7 @@ fn build_streaming_response(
 fn transform_sse_chunk(
     chunk: &Bytes,
     buffer: &mut String,
-    adapter: &Box<dyn super::protocol::ProtocolAdapter + Send>,
+    adapter: &Box<dyn super::protocol::ProtocolAdapter + Send + Sync>,
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
 ) -> Option<Bytes> {
@@ -635,13 +644,7 @@ fn should_disable_entry_for_status(disable_codes: &str, status: u16) -> bool {
 }
 
 async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
-    let recovery_secs = state
-        .db
-        .get_settings()
-        .ok()
-        .map(|s| s.circuit_recovery_secs)
-        .unwrap_or(300)
-        .max(1);
+    let recovery_secs = state.settings.read().await.circuit_recovery_secs.max(1);
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
 
     let _ = state.db.toggle_entry(&entry.id, false);
@@ -662,8 +665,7 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     state.failure_counts.write().await.remove(entry_id);
 
     let mut breakers = state.circuit_breakers.write().await;
-    let recovery_secs = state.db.get_settings().ok()
-        .map(|s| s.circuit_recovery_secs as u64).unwrap_or(300);
+    let recovery_secs = state.settings.read().await.circuit_recovery_secs as u64;
 
     let cb = breakers
         .entry(entry_id.to_string())
@@ -672,17 +674,9 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
 }
 
 async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
-    let settings = state.db.get_settings().ok();
-    let recovery_secs = settings
-        .as_ref()
-        .map(|s| s.circuit_recovery_secs)
-        .unwrap_or(300)
-        .max(1);
-    let threshold = settings
-        .as_ref()
-        .map(|s| s.circuit_failure_threshold as u32)
-        .unwrap_or(1)
-        .max(1);
+    let settings = state.settings.read().await.clone();
+    let threshold = (settings.circuit_failure_threshold as u32).max(1);
+    let recovery_secs = settings.circuit_recovery_secs.max(1);
 
     // Increment failure count in memory
     let mut counts = state.failure_counts.write().await;
@@ -718,10 +712,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
-    let recovery_secs_u64 = settings
-        .as_ref()
-        .map(|s| s.circuit_recovery_secs as u64)
-        .unwrap_or(300);
+    let recovery_secs_u64 = settings.circuit_recovery_secs as u64;
 
     let cb = breakers
         .entry(entry.id.clone())
@@ -733,16 +724,13 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
 fn spawn_record_circuit_success(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
     failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
+    settings: Arc<tokio::sync::RwLock<AppSettings>>,
     db: Arc<Database>,
     app_handle: tauri::AppHandle,
     entry_id: String,
 ) {
     tokio::spawn(async move {
-        let recovery_secs = db
-            .get_settings()
-            .ok()
-            .map(|s| s.circuit_recovery_secs as u64)
-            .unwrap_or(300);
+        let recovery_secs = settings.read().await.circuit_recovery_secs as u64;
 
         let _ = db.set_entry_cooldown(&entry_id, None);
         let _ = app_handle.emit("entries-changed", ());
@@ -763,21 +751,15 @@ fn spawn_record_circuit_success(
 fn spawn_cool_down_entry(
     circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
     failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
+    settings: Arc<tokio::sync::RwLock<AppSettings>>,
     db: Arc<Database>,
     app_handle: tauri::AppHandle,
     entry_id: String,
 ) {
     tokio::spawn(async move {
-        let settings = db.get_settings().ok();
-        let threshold = settings
-            .as_ref()
-            .map(|s| s.circuit_failure_threshold as u32)
-            .unwrap_or(1)
-            .max(1);
-        let recovery_secs = settings
-            .as_ref()
-            .map(|s| s.circuit_recovery_secs as u64)
-            .unwrap_or(300);
+        let settings = settings.read().await.clone();
+        let threshold = (settings.circuit_failure_threshold as u32).max(1);
+        let recovery_secs = settings.circuit_recovery_secs as u64;
 
         // Increment failure count
         let mut counts = failure_counts.write().await;

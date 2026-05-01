@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -53,10 +53,13 @@ type ChannelFormState = {
   enabled: boolean;
 };
 
-function shortReleaseDate(value?: string) {
+function formatReleaseDate(value?: string) {
   if (!value) return "";
-  const match = value.match(/^(\d{4})-(\d{2})/);
-  return match ? `${match[1]}-${match[2]}` : value;
+  const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  }
+  return value;
 }
 
 function buildEntryCatalogMeta(modelName: string): ModelCatalogMetaUpdate {
@@ -86,7 +89,7 @@ function buildEntryCatalogMeta(modelName: string): ModelCatalogMetaUpdate {
   if (model.attachment) features.push("attachment");
   if (model.temperature) features.push("temperature");
 
-  const releaseDate = shortReleaseDate(model.release_date);
+  const releaseDate = formatReleaseDate(model.release_date);
   const context = formatTokenCount(model.limit?.context) || "";
   const output = formatTokenCount(model.limit?.output) || "";
   const zhFeatureLabels: Record<string, string> = {
@@ -153,6 +156,23 @@ export function ChannelPage() {
     queryKey: ["channels"],
     queryFn: listChannels,
   });
+
+  // Fetch API pool entries to count per-channel entries
+  const { data: entries } = useQuery({
+    queryKey: ["entries"],
+    queryFn: listEntries,
+  });
+
+  // Build a map of channel_id -> entry count
+  const channelEntryCount = useMemo(() => {
+    const map = new Map<string, number>();
+    if (entries) {
+      for (const entry of entries) {
+        map.set(entry.channel_id, (map.get(entry.channel_id) || 0) + 1);
+      }
+    }
+    return map;
+  }, [entries]);
 
   const autoOpenedRef = useRef(false);
   useEffect(() => {
@@ -228,15 +248,24 @@ export function ChannelPage() {
           <CardTitle>{t("channel.listTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-hidden">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                <col className="w-24" />
+                <col />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-20" />
+                <col className="w-32" />
+              </colgroup>
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium">{t("channel.name")}</th>
-                  <th className="px-4 py-3 text-left font-medium">{t("channel.type")}</th>
-                  <th className="px-4 py-3 text-left font-medium">{t("channel.baseUrl")}</th>
-                  <th className="px-4 py-3 text-left font-medium">{t("channel.status")}</th>
-                  <th className="px-4 py-3 text-left font-medium">
+                  <th className="px-4 py-3 text-left font-medium truncate">{t("channel.name")}</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">{t("channel.type")}</th>
+                  <th className="px-4 py-3 text-left font-medium truncate">{t("channel.baseUrl")}</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">{t("channel.status")}</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       <span>{t("channel.responseTime")}</span>
                       <button
@@ -250,8 +279,8 @@ export function ChannelPage() {
                       </button>
                     </div>
                   </th>
-                  <th className="px-4 py-3 text-left font-medium">{t("channel.modelCount")}</th>
-                  <th className="px-4 py-3 text-right font-medium">{t("channel.actions")}</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">{t("channel.modelCount")}</th>
+                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap">{t("channel.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -268,6 +297,7 @@ export function ChannelPage() {
                       setShowEdit(true);
                     }}
                     onDelete={() => deleteMutation.mutate(channel.id)}
+                    entryCount={channelEntryCount.get(channel.id) || 0}
                     testingChannelId={testingChannelId}
                     testResults={testResults}
                   />
@@ -299,6 +329,7 @@ function ChannelRow({
   onToggleExpand,
   onEdit,
   onDelete,
+  entryCount,
   testingChannelId,
   testResults,
 }: {
@@ -307,6 +338,7 @@ function ChannelRow({
   onToggleExpand: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  entryCount: number;
   testingChannelId?: string | null;
   testResults?: Record<string, string>;
 }) {
@@ -370,6 +402,7 @@ function ChannelRow({
 
   const availableModels: ModelInfo[] = channel.available_models || [];
   const selectedModels: string[] = channel.selected_models || [];
+  const modelCountText = `${entryCount} / ${availableModels.length}`;
 
   const filteredModels = modelSearch
     ? availableModels.filter((m) =>
@@ -399,9 +432,9 @@ function ChannelRow({
   return (
     <>
       <tr className="border-b hover:bg-muted/30">
-        <td className="px-4 py-3">
-          <button type="button" className="text-left" onClick={onToggleExpand}>
-            <div className="font-medium">{channel.name}</div>
+        <td className="px-4 py-3 min-w-0">
+          <button type="button" className="text-left min-w-0 max-w-full" onClick={onToggleExpand}>
+            <div className="font-medium truncate">{channel.name}</div>
             {channel.notes ? (
               <div className="text-xs text-muted-foreground mt-1 line-clamp-1">{channel.notes}</div>
             ) : null}
@@ -412,7 +445,9 @@ function ChannelRow({
             {channel.api_type}
           </span>
         </td>
-        <td className="px-4 py-3 font-mono text-xs max-w-[320px] truncate">{channel.base_url}</td>
+        <td className="px-4 py-3 font-mono text-xs min-w-0" title={channel.base_url}>
+          <div className="truncate">{channel.base_url}</div>
+        </td>
         <td className="px-4 py-3 whitespace-nowrap">
           <span className={cn(
             "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
@@ -436,8 +471,8 @@ function ChannelRow({
             <span className="text-red-500" title={t("channel.latencyTestFailed")}><XCircle className="h-3.5 w-3.5" /></span>
           )}
         </td>
-        <td className="px-4 py-3 whitespace-nowrap">{selectedModels.length} / {availableModels.length}</td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 whitespace-nowrap">{modelCountText}</td>
+        <td className="px-4 py-3 whitespace-nowrap">
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
               <Edit className="h-4 w-4" />
@@ -486,7 +521,7 @@ function ChannelRow({
                 <InfoBlock label={t("channel.baseUrl")} value={channel.base_url} mono />
                 <InfoBlock label={t("channel.apiKey")} value={maskSecret(channel.api_key)} mono />
                 <InfoBlock label={t("channel.updatedAt")} value={new Date(channel.updated_at * 1000).toLocaleString()} />
-                <InfoBlock label={t("channel.modelCount")} value={`${selectedModels.length} / ${availableModels.length}`} />
+                <InfoBlock label={t("channel.modelCount")} value={modelCountText} />
               </div>
 
               <div className="rounded-md border bg-muted/20 p-4 space-y-3">
@@ -582,6 +617,7 @@ function ChannelEditorDialog({
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [urlProbe, setUrlProbe] = useState<ProbeResult | null>(null);
   const [probingUrl, setProbingUrl] = useState(false);
+  const probeSeqRef = useRef(0);
   const [endpointVerified, setEndpointVerified] = useState(false);
 
   const isEdit = !!channel;
@@ -613,12 +649,25 @@ function ChannelEditorDialog({
 
   // Debounced URL probe on base_url change (lightweight: just HTTP HEAD)
   useEffect(() => {
-    if (!form.base_url.trim()) { setUrlProbe(null); return; }
+    const seq = ++probeSeqRef.current;
+    if (!form.base_url.trim()) {
+      setUrlProbe(null);
+      setProbingUrl(false);
+      return;
+    }
+    setUrlProbe(null);
     setProbingUrl(true);
     const t = setTimeout(async () => {
-      try { setUrlProbe(await probeUrl(form.base_url.trim())); }
-      catch { setUrlProbe({ reachable: false, status_code: null, latency_ms: 0, detected_type: null, message: "Probe failed" }); }
-      finally { setProbingUrl(false); }
+      try {
+        const result = await probeUrl(form.base_url.trim());
+        if (probeSeqRef.current === seq) setUrlProbe(result);
+      } catch {
+        if (probeSeqRef.current === seq) {
+          setUrlProbe({ reachable: false, status_code: null, latency_ms: 0, detected_type: null, message: "Probe failed" });
+        }
+      } finally {
+        if (probeSeqRef.current === seq) setProbingUrl(false);
+      }
     }, 800);
     return () => clearTimeout(t);
   }, [form.base_url]);
@@ -627,6 +676,7 @@ function ChannelEditorDialog({
     if (key === "api_type" || key === "base_url" || key === "api_key") {
       setEndpointVerified(false);
       setModelsValidated(false);
+      setUrlProbe(null);
       setAvailableModels([]);
       setSelectedModels([]);
     }
@@ -648,15 +698,38 @@ function ChannelEditorDialog({
   };
 
   const handleFetchModels = async () => {
+    if (probingUrl) {
+      toast.error("URL is still being checked. Please wait.");
+      return;
+    }
+
+    let probe = urlProbe;
+    if (!probe) {
+      setProbingUrl(true);
+      try {
+        probe = await probeUrl(form.base_url.trim());
+        setUrlProbe(probe);
+      } catch {
+        probe = { reachable: false, status_code: null, latency_ms: 0, detected_type: null, message: "Probe failed" };
+        setUrlProbe(probe);
+      } finally {
+        setProbingUrl(false);
+      }
+    }
+
+    if (!probe.reachable) {
+      toast.error(`URL unreachable: ${probe.message}`);
+      return;
+    }
+
     setFetchingModels(true);
     setModelsValidated(false);
-    setAvailableModels([]);
-    setSelectedModels([]);
     try {
       // New and edit mode use the same semantics here:
       // fetch models validates only the current form values and updates the dialog state.
       // Persisting channel config and selected models happens only when the user clicks Save.
       const result = await fetchModelsDirect(form.api_type, form.base_url, form.api_key, false);
+
       setForm((prev) => ({
         ...prev,
         api_type: result.detected_type as ApiType,
@@ -784,7 +857,7 @@ function ChannelEditorDialog({
     ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
     : availableModels;
 
-  const canFetchModels = form.name && form.base_url && form.api_key;
+  const canFetchModels = !!(form.name && form.base_url && form.api_key) && !probingUrl && urlProbe?.reachable !== false;
   const canSave = !!canFetchModels;
 
   const handleClose = () => {
@@ -840,7 +913,7 @@ function ChannelEditorDialog({
                   {probingUrl ? (
                     <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                   ) : urlProbe?.reachable ? (
-                    <span className="text-[10px] text-green-600 font-medium whitespace-nowrap">{urlProbe.latency_ms}ms ✓</span>
+                    <span className="text-[10px] text-green-600 font-medium whitespace-nowrap">{formatResponseMs(String(urlProbe.latency_ms))} ✓</span>
                   ) : urlProbe ? (
                     <span className="text-[10px] text-red-500" title={urlProbe.message}>✗</span>
                   ) : null}

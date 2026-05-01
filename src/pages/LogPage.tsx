@@ -122,18 +122,34 @@ export function LogPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-md border overflow-auto">
-        <table className="w-full text-sm">
+      <div className="rounded-md border overflow-x-hidden">
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-40" />
+            <col className="w-28" />
+            <col className="w-24" />
+            <col />
+            <col className="w-28" />
+            <col className="w-16" />
+            <col className="w-16" />
+            <col className="w-20" />
+          </colgroup>
           <thead>
             <tr className="border-b bg-muted/50">
-              <th className="px-3 py-2 text-left font-medium">{t("log.time")}</th>
-              <th className="px-3 py-2 text-left font-medium">{t("log.channel")}</th>
-              <th className="px-3 py-2 text-left font-medium">{t("log.token")}</th>
-              <th className="px-3 py-2 text-left font-medium">{t("log.model")}</th>
-              <th className="px-3 py-2 text-left font-medium">{t("log.duration")}</th>
-              <th className="px-3 py-2 text-right font-medium">{t("log.promptTokens")}</th>
-              <th className="px-3 py-2 text-right font-medium">{t("log.completionTokens")}</th>
-              <th className="px-3 py-2 text-left font-medium">{t("log.status")}</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.time")}</th>
+              <th className="px-3 py-2 text-left font-medium truncate">{t("log.channel")}</th>
+              <th className="px-3 py-2 text-left font-medium truncate">{t("log.token")}</th>
+              <th className="px-3 py-2 text-left font-medium truncate">{t("log.model")}</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.duration")}</th>
+              <th className="px-3 py-2 text-right font-medium leading-tight">
+                <div>输入</div>
+                <div>TOKEN</div>
+              </th>
+              <th className="px-3 py-2 text-right font-medium leading-tight">
+                <div>输出</div>
+                <div>TOKEN</div>
+              </th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -152,21 +168,21 @@ export function LogPage() {
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div>{new Date(log.created_at * 1000).toLocaleString()}</div>
                     </td>
-                    <td className="px-3 py-2">
-                      <div>{log.channel_name}</div>
+                    <td className="px-3 py-2 min-w-0">
+                      <div className="truncate" title={log.channel_name}>{log.channel_name}</div>
                     </td>
-                    <td className="px-3 py-2">
-                      <div>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
+                    <td className="px-3 py-2 min-w-0">
+                      <div className="truncate" title={log.token_name || log.access_key_name || undefined}>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <div>{resolvedModel}</div>
+                    <td className="px-3 py-2 font-mono text-xs min-w-0">
+                      <div className="truncate" title={resolvedModel}>{resolvedModel}</div>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div>
                     </td>
                     <td className="px-3 py-2 text-right">{log.prompt_tokens}</td>
                     <td className="px-3 py-2 text-right">{log.completion_tokens}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 whitespace-nowrap">
                       <span className={log.success ? "text-green-600" : "text-red-500"}>
                         {log.success ? t("log.success") : t("log.failed")}
                       </span>

@@ -22,8 +22,36 @@ struct ProbeSuccess {
     corrected_base_url: String,
 }
 
+#[derive(Debug, Clone)]
+enum ModelsEndpointError {
+    Network(String),
+    Timeout(String),
+    Auth(u16),
+    Http(u16),
+    Parse(String),
+    Empty,
+}
+
+impl ModelsEndpointError {
+    fn is_blocking(&self) -> bool {
+        matches!(self, Self::Network(_) | Self::Timeout(_) | Self::Auth(_))
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::Network(msg) => format!("Network error: {msg}"),
+            Self::Timeout(msg) => format!("Network timeout: {msg}"),
+            Self::Auth(status) => format!("Authentication failed: HTTP {status}"),
+            Self::Http(status) => format!("HTTP {status}"),
+            Self::Parse(msg) => format!("Invalid model list response: {msg}"),
+            Self::Empty => "Empty model list".to_string(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct EndpointGuess {
+
     detected_type: String,
     corrected_base_url: String,
 }
@@ -197,12 +225,11 @@ pub async fn fetch_models(
 ) -> Result<FetchModelsResult, AppError> {
     let channel = state.db.get_channel(&channel_id)?;
 
-    // Clear stale model metadata before re-detection/fetch.
-    // If detection/fetch fails, the old available/selected models must not remain visible.
-    state.db.update_channel_models(&channel_id, &[], &[])?;
-    state.db.update_channel_response_ms(&channel_id, "")?;
+    // Do not clear old model metadata before validation succeeds.
+    // Some gateways do not expose a model-list endpoint but still work with manually added models.
 
     // Step 1: Validate endpoint and get corrected type/url
+
     let endpoint_guess = detect_endpoint_guess(&channel.api_type, &channel.base_url, &channel.api_key).await;
 
     // If validation found a correction, save it immediately (even if fetch later fails)
@@ -213,11 +240,8 @@ pub async fn fetch_models(
                 channel.api_type, channel.base_url, guess.detected_type, guess.corrected_base_url);
         }
     } else {
-        // Validation completely failed — disable channel and bail
-        state.db.update_channel(&channel_id, None, None, None, None, Some(false), None)?;
-        state.db.disable_entries_for_channel(&channel_id)?;
         return Err(AppError::Network(
-            "Could not validate endpoint. Check URL, API type, and API key.".into(),
+            "Could not validate endpoint. Check network, URL, API type, and API key.".into(),
         ));
     }
 
@@ -239,9 +263,6 @@ pub async fn fetch_models(
             }
         }
         Err(err) => {
-            // Validation passed but model fetch failed — disable channel
-            state.db.update_channel(&channel_id, None, None, None, None, Some(false), None)?;
-            state.db.disable_entries_for_channel(&channel_id)?;
             return Err(err);
         }
     };
@@ -320,20 +341,36 @@ async fn detect_endpoint_guess(
     // Phase 1: validate user's selected type first.
     // custom keeps original URL untouched; other types use base site + type-specific URL rules.
     let phase1_base_url = if api_type == "custom" { &original_url } else { &base_site };
-    if let Some(guess) = detect_type_with_base_url(&client, api_type, phase1_base_url, api_key, true).await {
-        return Some(guess);
+    match detect_type_with_base_url(&client, api_type, phase1_base_url, api_key, true).await {
+        DetectionResult::Found(guess) => return Some(guess),
+        DetectionResult::Blocked(err) => {
+            log::warn!("[detect_endpoint] Stop after selected type failed with blocking error: {}", err.message());
+            return None;
+        }
+        DetectionResult::NotFound => {}
     }
 
     // Phase 2: correction flow, fixed priority order.
     // custom receives original URL; all other types receive base site + their own URL rules.
     for current_type in ["custom", "openai", "claude", "gemini", "azure"] {
         let candidate_base_url = if current_type == "custom" { &original_url } else { &base_site };
-        if let Some(guess) = detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false).await {
-            return Some(guess);
+        match detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false).await {
+            DetectionResult::Found(guess) => return Some(guess),
+            DetectionResult::Blocked(err) => {
+                log::warn!("[detect_endpoint] Stop correction flow after blocking error: {}", err.message());
+                return None;
+            }
+            DetectionResult::NotFound => {}
         }
     }
 
     None
+}
+
+enum DetectionResult {
+    Found(EndpointGuess),
+    NotFound,
+    Blocked(ModelsEndpointError),
 }
 
 async fn detect_type_with_base_url(
@@ -342,34 +379,37 @@ async fn detect_type_with_base_url(
     base_url: &str,
     api_key: &str,
     respect_selected_type: bool,
-) -> Option<EndpointGuess> {
+) -> DetectionResult {
     let adapter = get_adapter(api_type);
     let urls = build_models_url_variants(adapter.as_ref(), base_url, api_key);
     for url in &urls {
         match try_models_endpoint(client, adapter.as_ref(), url, api_key).await {
-            Ok(models) if !models.is_empty() => {
-                if !is_authoritative_detection_success(api_type, url) {
-                    continue;
+            Ok(models) => {
+                if !models.is_empty() {
+                    if !is_authoritative_detection_success(api_type, url) {
+                        continue;
+                    }
+                    let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
+                    let detected_type = if respect_selected_type {
+                        api_type.to_string()
+                    } else {
+                        resolve_detected_type(api_type, &corrected_base_url)
+                    };
+                    log::info!("[detect_endpoint] OK via {url}, type={detected_type}, base_url={corrected_base_url}");
+                    return DetectionResult::Found(EndpointGuess {
+                        detected_type,
+                        corrected_base_url,
+                    });
                 }
-                let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
-                let detected_type = if respect_selected_type {
-                    api_type.to_string()
-                } else {
-                    resolve_detected_type(api_type, &corrected_base_url)
-                };
-                log::info!("[detect_endpoint] OK via {url}, type={detected_type}, base_url={corrected_base_url}");
-                return Some(EndpointGuess {
-                    detected_type,
-                    corrected_base_url,
-                });
             }
-            Ok(_) => {}
+            Err(err) if err.is_blocking() => return DetectionResult::Blocked(err),
             Err(_) => {}
         }
     }
 
-    None
+    DetectionResult::NotFound
 }
+
 
 async fn fetch_models_with_fallback(
     preferred_type: &str,
@@ -391,16 +431,23 @@ async fn fetch_models_with_fallback(
             let adapter = get_adapter(current_type);
             let urls = build_models_url_variants(adapter.as_ref(), &candidate_base_url, api_key);
             for url in &urls {
-                match try_models_endpoint(&client, adapter.as_ref(), url, api_key).await {
-                    Ok(models) if !models.is_empty() => {
-                        let corrected_base_url = canonical_base_url_for_success(current_type, &candidate_base_url, url);
-                        let models = dedup_models(models);
-                        log::info!("[fetch_models] OK via {url}, type={current_type}, base_url={} ({} models)", corrected_base_url, models.len());
-                        return Ok((models, current_type, corrected_base_url));
+                    match try_models_endpoint(&client, adapter.as_ref(), url, api_key).await {
+                        Ok(models) if !models.is_empty() => {
+                            let corrected_base_url = canonical_base_url_for_success(current_type, &candidate_base_url, url);
+                            let models = dedup_models(models);
+                            log::info!("[fetch_models] OK via {url}, type={current_type}, base_url={} ({} models)", corrected_base_url, models.len());
+                            return Ok((models, current_type, corrected_base_url));
+                        }
+                        Ok(_) => {}
+                        Err(err) if err.is_blocking() => {
+                            return Err(AppError::Network(format!(
+                                "Could not fetch models due to blocking endpoint error. {}",
+                                err.message()
+                            )));
+                        }
+                        Err(e) => { last_err = e.message(); }
                     }
-                    Ok(_) => {}
-                    Err(e) => { last_err = e; }
-                }
+
             }
         }
     }
@@ -606,24 +653,43 @@ fn build_models_url_variants(
     urls
 }
 
-/// Try a single models endpoint, return parsed models or error string
+/// Try a single models endpoint, return parsed models or a structured endpoint error.
 async fn try_models_endpoint(
     client: &reqwest::Client,
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
     url: &str,
     api_key: &str,
-) -> Result<Vec<ModelInfo>, String> {
+) -> Result<Vec<ModelInfo>, ModelsEndpointError> {
     let resp = adapter.apply_auth(client.get(url), api_key)
-        .send().await.map_err(|e| format!("{e}"))?;
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                ModelsEndpointError::Timeout(e.to_string())
+            } else if e.is_connect() || e.is_request() {
+                ModelsEndpointError::Network(e.to_string())
+            } else {
+                ModelsEndpointError::Network(e.to_string())
+            }
+        })?;
     let status = resp.status();
-    if status != reqwest::StatusCode::OK {
-        return Err(format!("HTTP {status}"));
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ModelsEndpointError::Auth(status.as_u16()));
     }
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("{e}"))?;
-    Ok(adapter.parse_models_response(&body).into_iter()
+    if status != reqwest::StatusCode::OK {
+        return Err(ModelsEndpointError::Http(status.as_u16()));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| ModelsEndpointError::Parse(e.to_string()))?;
+    let models: Vec<ModelInfo> = adapter.parse_models_response(&body).into_iter()
         .map(|(id, owned_by)| ModelInfo { name: id.clone(), id, owned_by })
-        .collect())
+        .collect();
+    if models.is_empty() {
+        Err(ModelsEndpointError::Empty)
+    } else {
+        Ok(models)
+    }
 }
+
 
 /// Try to extract model list from a JSON body (even error responses)
 fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {

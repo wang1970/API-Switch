@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ApiEntry } from "@/types";
+import { formatResponseMs } from "@/lib/utils";
 
 interface Message {
   role: "user" | "assistant";
@@ -126,10 +127,7 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
     onOpenChange(v);
   };
 
-  const formatMs = (ms: number) => {
-    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${ms}ms`;
-  };
+  const formatMs = (ms: number) => formatResponseMs(String(ms));
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>

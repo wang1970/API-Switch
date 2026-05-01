@@ -1,0 +1,4 @@
+# Increase rustc's own stack size on Windows to prevent STATUS_STACK_BUFFER_OVERRUN
+# during compilation of large dependency graphs (tauri, reqwest, hyper, etc.)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-args=/STACK:8388608"]

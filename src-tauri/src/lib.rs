@@ -3,7 +3,7 @@ mod database;
 mod error;
 mod proxy;
 
-use database::Database;
+use database::{AppSettings, Database};
 use proxy::ProxyServer;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -15,6 +15,7 @@ pub use error::AppError;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
+    pub settings: Arc<tokio::sync::RwLock<AppSettings>>,
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
     pub failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
 }
@@ -30,9 +31,11 @@ pub fn run() {
             // Initialize database
             let db = Database::open()?;
             db.create_tables()?;
+            let settings_cache = db.get_settings().unwrap_or_default();
 
             let state = AppState {
                 db: Arc::new(db),
+                settings: Arc::new(tokio::sync::RwLock::new(settings_cache)),
                 proxy: Arc::new(tokio::sync::RwLock::new(None)),
                 failure_counts: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             };
@@ -42,23 +45,28 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async {
                 let app_state = handle.state::<AppState>();
-                if let Ok(settings) = app_state.db.get_settings() {
-                    if settings.proxy_enabled {
-                        let port = settings.listen_port;
-                        let server = ProxyServer::new(port, app_state.db.clone(), handle.clone(), app_state.failure_counts.clone());
-                        if let Err(e) = server.start().await {
-                            log::error!("Failed to auto-start proxy: {e}");
-                        } else {
-                            let mut proxy_guard = app_state.proxy.write().await;
-                            *proxy_guard = Some(server);
-                            log::info!("Proxy auto-started on port {port}");
-                        }
+                let settings = app_state.settings.read().await.clone();
+                if settings.proxy_enabled {
+                    let port = settings.listen_port;
+                    let server = ProxyServer::new(
+                        port,
+                        app_state.db.clone(),
+                        app_state.settings.clone(),
+                        handle.clone(),
+                        app_state.failure_counts.clone(),
+                    );
+                    if let Err(e) = server.start().await {
+                        log::error!("Failed to auto-start proxy: {e}");
+                    } else {
+                        let mut proxy_guard = app_state.proxy.write().await;
+                        *proxy_guard = Some(server);
+                        log::info!("Proxy auto-started on port {port}");
                     }
                 }
             });
 
             // Read settings to decide startup behavior
-            let settings = app.state::<AppState>().db.get_settings().unwrap_or_default();
+            let settings = app.state::<AppState>().settings.blocking_read().clone();
 
             // Build tray icon (ref: cc-switch/src/lib.rs)
             let tray_menu = build_tray_menu(app.handle())?;
@@ -147,12 +155,13 @@ pub fn run() {
 pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let app_state = app.state::<AppState>();
     let mut entries = app_state
-        .db.get_enabled_entries_for_routing()
+        .db.get_enabled_entries_for_auto()
         .unwrap_or_default();
     let sort_mode = app_state
-        .db.get_settings()
-        .map(|settings| settings.default_sort_mode)
-        .unwrap_or_else(|_| "custom".to_string());
+        .settings
+        .blocking_read()
+        .default_sort_mode
+        .clone();
     proxy::apply_sort_mode(&mut entries, &sort_mode);
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 

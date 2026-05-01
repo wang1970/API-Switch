@@ -88,13 +88,14 @@ fn sync_autostart(settings: &AppSettings) {
 }
 
 #[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, AppError> {
-    state.db.get_settings()
+pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, AppError> {
+    Ok(state.settings.read().await.clone())
 }
 
 #[tauri::command]
-pub fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), AppError> {
+pub async fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), AppError> {
     state.db.update_settings(&settings)?;
+    *state.settings.write().await = settings.clone();
     sync_autostart(&settings);
     Ok(())
 }

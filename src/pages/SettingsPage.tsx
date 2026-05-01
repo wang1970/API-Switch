@@ -222,8 +222,8 @@ export function SettingsPage() {
             <Select
               value={s.default_sort_mode}
               onValueChange={(v: ModelSortMode) => {
-                update("default_sort_mode", v);
                 localStorage.setItem("api-switch-sort-mode", v);
+                update("default_sort_mode", v);
               }}
             >
               <SelectTrigger className="w-32">

@@ -22,9 +22,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings, backfillEntryCatalogMeta } from "@/lib/api";
+import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings, backfillEntryCatalogMeta, getSettings } from "@/lib/api";
 import type { ApiEntry, Channel, ModelSortMode } from "@/types";
-import { cn, formatResponseMs } from "@/lib/utils";
+import { cn, formatResponseMs, parseResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from "@/lib/modelsCatalog";
 import {
@@ -57,11 +57,11 @@ function StatusDot({ state }: { state: string }) {
   );
 }
 
-function shortReleaseDate(value?: string) {
+function formatReleaseDate(value?: string) {
   if (!value) return null;
-  const match = value.match(/^(\d{4})-(\d{2})/);
-  if (match) {
-    return `${match[1]}-${match[2]}`;
+  const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    return `${compact[1]}-${compact[2]}-${compact[3]}`;
   }
   return value;
 }
@@ -105,7 +105,7 @@ function buildCatalogDisplayMeta(modelId: string): CatalogDisplayMeta {
   if (model.attachment) features.push("attachment");
   if (model.temperature) features.push("temperature");
 
-  const releaseDate = shortReleaseDate(model.release_date) || "";
+  const releaseDate = formatReleaseDate(model.release_date) || "";
   const context = formatTokenCount(model.limit?.context) || "";
   const output = formatTokenCount(model.limit?.output) || "";
   const zhFeatureLabels: Record<string, string> = {
@@ -269,7 +269,7 @@ function CardBody({
           ) : testResult === "X" ? (
             <XCircle className="h-3 w-3 text-red-500 shrink-0" />
           ) : testResult ? (
-            <span className="text-xs text-green-600 shrink-0">({testResult})</span>
+            <span className="text-xs text-green-600 shrink-0">({formatResponseMs(testResult)})</span>
           ) : entry.response_ms === "X" ? (
             <XCircle className="h-3 w-3 text-red-500 shrink-0" />
           ) : entry.response_ms ? (
@@ -411,6 +411,18 @@ export function ApiPoolPage() {
     queryFn: listChannels,
   });
 
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: getSettings,
+  });
+
+  useEffect(() => {
+    const saved = localStorage.getItem("api-switch-sort-mode");
+    if (!saved && settings?.default_sort_mode) {
+      setSortMode(settings.default_sort_mode);
+    }
+  }, [settings?.default_sort_mode]);
+
   // Pre-compute catalog fallback only for entries missing DB metadata.
   const catalogMap = useMemo(() => {
     const map = new Map<string, CatalogDisplayMeta>();
@@ -473,8 +485,8 @@ export function ApiPoolPage() {
 
     if (sortMode === "fastest") {
       enabled.sort((a, b) => {
-        const msA = a.response_ms && a.response_ms !== "X" ? parseInt(a.response_ms, 10) : Infinity;
-        const msB = b.response_ms && b.response_ms !== "X" ? parseInt(b.response_ms, 10) : Infinity;
+        const msA = parseResponseMs(a.response_ms) ?? Infinity;
+        const msB = parseResponseMs(b.response_ms) ?? Infinity;
         return msA - msB;
       });
       disabled.sort((a, b) => a.sort_index - b.sort_index);

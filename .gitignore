@@ -28,6 +28,7 @@ src-tauri/target
 
 # Build artifacts
 tsconfig.tsbuildinfo
+release/
 
 # Design assets (not for repo)
 design/

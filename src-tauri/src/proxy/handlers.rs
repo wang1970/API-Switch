@@ -28,7 +28,7 @@ pub async fn handle_chat_completions(
     let headers = &parts.headers;
 
     // Extract Access Key
-    let access_key = auth::extract_access_key(headers, &state.db).map_err(|err| match err {
+    let access_key = auth::extract_access_key(headers, &state).await.map_err(|err| match err {
         crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
         other => ProxyError::from(other),
     })?;
@@ -54,11 +54,12 @@ pub async fn handle_chat_completions(
         .unwrap_or(false);
 
     // Resolve target entries
-    let enabled_entries = state.db.get_enabled_entries_for_routing()?;
-    let sort_mode = state.db.get_settings().ok()
-        .and_then(|s| Some(s.default_sort_mode))
-        .unwrap_or_else(|| "custom".to_string());
-    let resolved = router::resolve(&requested_model, &enabled_entries, &state.circuit_breakers, &sort_mode).await;
+    // - AUTO: only enabled entries enter the auto pool
+    // - exact model name: ALL entries (including disabled) are routable
+    let all_entries = state.db.get_entries_for_routing()?;
+    let auto_entries = state.db.get_enabled_entries_for_auto()?;
+    let sort_mode = state.settings.read().await.default_sort_mode.clone();
+    let resolved = router::resolve(&requested_model, &all_entries, &auto_entries, &state.circuit_breakers, &sort_mode).await;
 
     if resolved.is_empty() {
         return Err(ProxyError::NoAvailableProvider(requested_model));
@@ -77,11 +78,14 @@ pub async fn handle_chat_completions(
     .await
 }
 
-/// Handle /v1/models - list available models from the pool
+/// Handle /v1/models - list ALL models from the pool (including disabled).
+/// disabled only means "skip in AUTO", the model is still usable when requested by name.
 pub async fn handle_list_models(
     State(state): State<ProxyState>,
 ) -> Result<Json<Value>, ProxyError> {
-    let entries = state.db.get_enabled_entries_for_routing()?;
+    let mut entries = state.db.get_entries_for_routing()?;
+    let sort_mode = state.settings.read().await.default_sort_mode.clone();
+    router::apply_sort_mode(&mut entries, &sort_mode);
 
     let models: Vec<Value> = entries
         .iter()

@@ -1,15 +1,24 @@
 use super::circuit_breaker::CircuitBreaker;
 use crate::database::ApiEntry;
+use chrono::NaiveDate;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-/// Parse response_ms field (stored as milliseconds string, e.g. "1234") to i64.
+/// Parse response_ms field to milliseconds.
+/// Supports raw milliseconds ("1234") and legacy display values ("1.2s" / "350ms").
 /// Returns None if missing or unparseable.
 fn parse_response_ms(entry: &ApiEntry) -> Option<i64> {
-    entry
-        .response_ms
-        .as_deref()
-        .and_then(|s| s.parse::<i64>().ok())
+    let value = entry.response_ms.as_deref()?.trim().to_ascii_lowercase();
+    if value.is_empty() || value == "x" {
+        return None;
+    }
+    if let Some(milliseconds) = value.strip_suffix("ms") {
+        return milliseconds.parse::<f64>().ok().map(|ms| ms.round() as i64);
+    }
+    if let Some(seconds) = value.strip_suffix('s') {
+        return seconds.parse::<f64>().ok().map(|s| (s * 1000.0).round() as i64);
+    }
+    value.parse::<f64>().ok().map(|ms| ms.round() as i64)
 }
 
 /// Sort entries by response time ascending; entries without measurement go last.
@@ -22,14 +31,24 @@ fn sort_by_index(entries: &mut [ApiEntry]) {
     entries.sort_by_key(|e| e.sort_index);
 }
 
+fn parse_release_date(entry: &ApiEntry) -> Option<NaiveDate> {
+    let value = entry.release_date.as_deref()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        return Some(date);
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(&format!("{value}-01"), "%Y-%m-%d") {
+        return Some(date);
+    }
+    NaiveDate::parse_from_str(value, "%Y%m%d").ok()
+}
+
 /// Sort entries by release date descending; entries without release date go last.
 fn sort_by_release_date(entries: &mut [ApiEntry]) {
     entries.sort_by(|a, b| {
-        let date_cmp = b
-            .release_date
-            .as_deref()
-            .unwrap_or("")
-            .cmp(a.release_date.as_deref().unwrap_or(""));
+        let date_cmp = parse_release_date(b).cmp(&parse_release_date(a));
         if date_cmp == std::cmp::Ordering::Equal {
             a.sort_index.cmp(&b.sort_index)
         } else {
@@ -38,17 +57,25 @@ fn sort_by_release_date(entries: &mut [ApiEntry]) {
     });
 }
 
+fn is_not_cooled_down(entry: &ApiEntry) -> bool {
+    entry
+        .cooldown_until
+        .map(|until| until <= chrono::Utc::now().timestamp())
+        .unwrap_or(true)
+}
+
 /// Resolve which entries to try for a given model request.
 /// Returns an ordered list of entries to attempt (failover in order).
 ///
 /// Rules:
-/// - `auto`: use enabled entries only (auto-select pool), sorted by `sort_mode`.
-/// - exact model match: try matched enabled entries first (sorted by `sort_mode`),
-///   then fall back to enabled entries as auto-fallback to prevent disconnection.
-/// - wrong model name: fall back to enabled entries (AUTO behavior).
+/// - `auto`: use auto_entries only (enabled + non-cooldown pool), sorted by `sort_mode`.
+/// - exact model match: try matched entries from ALL visible entries (including disabled) when not cooled down,
+///   sorted by `sort_mode`, then fall back to auto_entries as auto-fallback.
+/// - wrong model name or all exact matches cooling down: fall back to auto_entries (AUTO behavior).
 pub async fn resolve(
     model: &str,
-    enabled_entries: &[ApiEntry],
+    all_entries: &[ApiEntry],
+    auto_entries: &[ApiEntry],
     circuit_breakers: &RwLock<HashMap<String, CircuitBreaker>>,
     sort_mode: &str,
 ) -> Vec<ApiEntry> {
@@ -73,27 +100,28 @@ pub async fn resolve(
 
     if model.is_empty() || model.eq_ignore_ascii_case("auto") {
         // AUTO: only enabled + available entries, sorted by sort_mode
-        return filter_available(enabled_entries);
+        return filter_available(auto_entries);
     }
 
-    // Exact model match from ENABLED entries only.
-    let mut enabled_available = filter_available(enabled_entries);
-    let mut matched: Vec<ApiEntry> = enabled_available
+    // Exact model match from ALL entries (including disabled).
+    let all_available = filter_available(all_entries);
+    let mut matched: Vec<ApiEntry> = all_available
         .iter()
-        .filter(|e| e.model == model)
+        .filter(|e| e.model == model && is_not_cooled_down(e))
         .cloned()
         .collect();
 
     if matched.is_empty() {
-        // Wrong model name → fallback to AUTO (enabled entries)
-        return enabled_available;
+        // Wrong model name or exact matches cooling down → fallback to AUTO (enabled entries)
+        return filter_available(auto_entries);
     }
 
     // Exact match found: try matched entries first,
-    // then append remaining enabled entries as auto-fallback.
+    // then append remaining auto entries as auto-fallback.
+    let auto_available = filter_available(auto_entries);
     apply_sort_mode(&mut matched, sort_mode);
     let mut result = matched;
-    for entry in &enabled_available {
+    for entry in &auto_available {
         if !result.iter().any(|e| e.id == entry.id) {
             result.push(entry.clone());
         }
@@ -146,7 +174,7 @@ mod tests {
             entry("third", "gemini-pro", true, 2),
         ];
 
-        let resolved = resolve("auto", &enabled, &breakers, "custom").await;
+        let resolved = resolve("auto", &enabled, &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
     }
@@ -159,7 +187,7 @@ mod tests {
             entry("fallback", "claude-3", true, 1),
         ];
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
+        let resolved = resolve("gpt-4o", &enabled, &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match", "fallback"]);
     }
@@ -169,7 +197,7 @@ mod tests {
         let breakers = RwLock::new(HashMap::new());
         let enabled = vec![entry("fallback", "claude-3", true, 1)];
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
+        let resolved = resolve("gpt-4o", &enabled, &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "fallback");
@@ -189,7 +217,7 @@ mod tests {
             guard.insert("open".to_string(), cb);
         }
 
-        let resolved = resolve("gpt-4o", &enabled, &breakers, "custom").await;
+        let resolved = resolve("gpt-4o", &enabled, &enabled, &breakers, "custom").await;
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "fallback");
@@ -199,14 +227,88 @@ mod tests {
     async fn latest_sort_uses_release_date_descending() {
         let breakers = RwLock::new(HashMap::new());
         let mut older = entry("older", "old-model", true, 0);
-        older.release_date = Some("2023-01".to_string());
+        older.release_date = Some("2023-01-15".to_string());
         let mut newer = entry("newer", "new-model", true, 1);
         newer.release_date = Some("2024-08".to_string());
         let missing = entry("missing", "unknown-model", true, 2);
-        let enabled = vec![older, missing, newer];
+        let mut newest = entry("newest", "newest-model", true, 3);
+        newest.release_date = Some("20240902".to_string());
+        let enabled = vec![older, missing, newest, newer];
 
-        let resolved = resolve("auto", &enabled, &breakers, "latest").await;
+        let resolved = resolve("auto", &enabled, &enabled, &breakers, "latest").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["newer", "older", "missing"]);
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["newest", "newer", "older", "missing"]);
+    }
+
+    #[tokio::test]
+    async fn fastest_sort_uses_response_ms_ascending_with_legacy_units() {
+        let breakers = RwLock::new(HashMap::new());
+        let mut slow = entry("slow", "slow-model", true, 0);
+        slow.response_ms = Some("1.2s".to_string());
+        let mut fast = entry("fast", "fast-model", true, 1);
+        fast.response_ms = Some("350ms".to_string());
+        let missing = entry("missing", "unknown-model", true, 2);
+        let enabled = vec![slow, missing, fast];
+
+        let resolved = resolve("auto", &enabled, &enabled, &breakers, "fastest").await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["fast", "slow", "missing"]);
+    }
+
+    #[tokio::test]
+    async fn custom_auto_uses_sort_index_order() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![
+            entry("third", "third-model", true, 2),
+            entry("first", "first-model", true, 0),
+            entry("second", "second-model", true, 1),
+        ];
+
+        let resolved = resolve("auto", &enabled, &enabled, &breakers, "custom").await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn exact_model_custom_keeps_match_before_auto_fallback() {
+        let breakers = RwLock::new(HashMap::new());
+        let enabled = vec![
+            entry("fallback-first", "fallback-model", true, 0),
+            entry("match", "target-model", true, 2),
+            entry("fallback-second", "other-model", true, 1),
+        ];
+
+        let resolved = resolve("target-model", &enabled, &enabled, &breakers, "custom").await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match", "fallback-first", "fallback-second"]);
+    }
+
+    #[tokio::test]
+    async fn exact_model_can_route_disabled_entry_but_auto_skips_it() {
+        let breakers = RwLock::new(HashMap::new());
+        let disabled = entry("disabled-match", "target-model", false, 0);
+        let fallback = entry("fallback", "fallback-model", true, 1);
+        let all = vec![disabled, fallback.clone()];
+        let auto = vec![fallback];
+
+        let auto_resolved = resolve("auto", &all, &auto, &breakers, "custom").await;
+        assert_eq!(auto_resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["fallback"]);
+
+        let exact_resolved = resolve("target-model", &all, &auto, &breakers, "custom").await;
+        assert_eq!(exact_resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["disabled-match", "fallback"]);
+    }
+
+    #[tokio::test]
+    async fn exact_model_skips_cooled_down_match_and_falls_back_to_auto() {
+        let breakers = RwLock::new(HashMap::new());
+        let mut cooled_down = entry("cooled-down-match", "target-model", false, 0);
+        cooled_down.cooldown_until = Some(chrono::Utc::now().timestamp() + 60);
+        let fallback = entry("fallback", "fallback-model", true, 1);
+        let all = vec![cooled_down, fallback.clone()];
+        let auto = vec![fallback];
+
+        let resolved = resolve("target-model", &all, &auto, &breakers, "custom").await;
+
+        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["fallback"]);
     }
 }
