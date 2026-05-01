@@ -165,6 +165,7 @@ pub fn run() {
             commands::test_chat::test_chat,
             commands::cli::set_user_env_vars,
             commands::cli::get_cli_data,
+            commands::limit::query_limit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

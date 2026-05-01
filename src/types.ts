@@ -250,3 +250,24 @@ export interface ProxyStatus {
   address: string;
   port: number;
 }
+
+// --- Limit Query ---
+
+export type LimitCredentialStatus = "valid" | "expired" | "not_found" | "parse_error";
+
+export interface LimitTier {
+  name: string;
+  utilization: number;
+  resetsAt: string | null;
+}
+
+export interface LimitQueryResult {
+  provider: string;
+  credentialStatus: LimitCredentialStatus;
+  credentialMessage: string | null;
+  success: boolean;
+  tiers: LimitTier[];
+  error: string | null;
+  queriedAt: number | null;
+  raw: unknown | null;
+}

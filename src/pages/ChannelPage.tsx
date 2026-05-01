@@ -518,7 +518,7 @@ function ChannelRow({
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-sm">
                 <InfoBlock label={t("channel.baseUrl")} value={channel.base_url} mono />
-                <InfoBlock label={t("channel.apiKey")} value={maskSecret(channel.api_key)} mono />
+                <InfoBlock label={t("channel.apiKey")} value={channel.api_key} mono />
                 <InfoBlock label={t("channel.updatedAt")} value={new Date(channel.updated_at * 1000).toLocaleString()} />
                 <InfoBlock label={t("channel.modelCount")} value={modelCountText} />
               </div>
@@ -1063,7 +1063,6 @@ function InfoBlock({ label, value, mono }: { label: string; value: string; mono?
 }
 
 function maskSecret(value: string) {
-  if (!value) return "-";
-  if (value.length <= 8) return "*".repeat(value.length);
-  return `${value.slice(0, 4)}****${value.slice(-4)}`;
+  return value;
 }
+

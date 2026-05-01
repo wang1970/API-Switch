@@ -100,9 +100,9 @@ export function TokenPage() {
                   </td>
                   <td className="px-4 py-3 font-medium">{key.name}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                        {key.key.slice(0, 8)}...{key.key.slice(-4)}
+                    <div className="flex items-center gap-1 min-w-0">
+                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono break-all flex-1 min-w-0">
+                        {key.key}
                       </code>
                       <Button
                         variant="ghost"

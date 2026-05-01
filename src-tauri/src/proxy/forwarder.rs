@@ -117,6 +117,61 @@ fn sanitize_url_for_log(url: &str) -> String {
     sanitized
 }
 
+fn response_header_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+}
+
+fn build_stream_diagnostic(
+    stage: &str,
+    err: Option<&reqwest::Error>,
+    entry: &ApiEntry,
+    url: &str,
+    status_code: i32,
+    headers: &reqwest::header::HeaderMap,
+    chunk_count: i64,
+    streamed_bytes: i64,
+    buffered_sse_bytes: usize,
+    first_token_ms: i64,
+    elapsed_ms: i64,
+) -> String {
+    let detail = serde_json::json!({
+        "stage": stage,
+        "channel": entry.channel_name.clone().unwrap_or_else(|| "unknown".to_string()),
+        "entry_id": entry.id,
+        "resolved_model": entry.model,
+        "url": sanitize_url_for_log(url),
+        "status_code": status_code,
+        "elapsed_ms": elapsed_ms,
+        "first_token_ms": first_token_ms,
+        "chunk_count": chunk_count,
+        "streamed_bytes": streamed_bytes,
+        "buffered_sse_bytes": buffered_sse_bytes,
+        "content_type": response_header_value(headers, "content-type"),
+        "content_encoding": response_header_value(headers, "content-encoding"),
+        "transfer_encoding": response_header_value(headers, "transfer-encoding"),
+        "server": response_header_value(headers, "server"),
+        "via": response_header_value(headers, "via"),
+        "cf_ray": response_header_value(headers, "cf-ray"),
+        "x_request_id": response_header_value(headers, "x-request-id"),
+        "x_accel_buffering": response_header_value(headers, "x-accel-buffering"),
+        "error": err.map(|e| serde_json::json!({
+            "kind": reqwest_error_kind(e),
+            "is_timeout": e.is_timeout(),
+            "is_connect": e.is_connect(),
+            "is_request": e.is_request(),
+            "is_body": e.is_body(),
+            "is_decode": e.is_decode(),
+            "is_redirect": e.is_redirect(),
+            "source_chain": reqwest_source_chain(e),
+            "message": e.to_string(),
+        })),
+    });
+    format!("Stream diagnostic: {detail}")
+}
+
 fn reqwest_error_kind(err: &reqwest::Error) -> &'static str {
     if err.is_timeout() {
         "timeout"
@@ -374,7 +429,7 @@ async fn forward_single(
         let needs_transform = adapter.needs_sse_transform();
         let response = build_streaming_response(
             state, entry, access_key, requested_model,
-            response, status_code, needs_transform, adapter, request_start, prior_attempts,
+            &url, response, status_code, needs_transform, adapter, request_start, prior_attempts,
         );
         Ok(ForwardResult {
             response, prompt_tokens: 0, completion_tokens: 0,
@@ -414,6 +469,7 @@ fn build_streaming_response(
     entry: &ApiEntry,
     access_key: Option<&AccessKey>,
     requested_model: &str,
+    upstream_url: &str,
     response: reqwest::Response,
     status_code: i32,
     needs_transform: bool,
@@ -421,6 +477,8 @@ fn build_streaming_response(
     request_start: std::time::Instant,
     prior_attempts: Vec<AttemptInfo>,
 ) -> axum::response::Response {
+    let response_headers = response.headers().clone();
+    let upstream_url = upstream_url.to_string();
     let start = request_start;
     let db = state.db.clone();
     let app_handle = state.app_handle.clone();
@@ -430,6 +488,8 @@ fn build_streaming_response(
     let first_token_ms = Arc::new(AtomicI64::new(0));
     let prompt_tokens = Arc::new(AtomicI64::new(0));
     let completion_tokens = Arc::new(AtomicI64::new(0));
+    let chunk_count = Arc::new(AtomicI64::new(0));
+    let streamed_bytes = Arc::new(AtomicI64::new(0));
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
     let logged = Arc::new(AtomicBool::new(false));
     let mut sse_buffer = String::new();
@@ -518,6 +578,8 @@ fn build_streaming_response(
                 if !seen_first_chunk.swap(true, Ordering::SeqCst) {
                     first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
                 }
+                chunk_count.fetch_add(1, Ordering::SeqCst);
+                streamed_bytes.fetch_add(chunk.len() as i64, Ordering::SeqCst);
 
                 if needs_transform {
                     if let Some(transformed) = transform_sse_chunk(
@@ -537,7 +599,24 @@ fn build_streaming_response(
             }
             Poll::Ready(Some(Err(err))) => {
                 if !logged.swap(true, Ordering::SeqCst) {
-                    let error_message = format!("Stream error: {err}");
+                    let chunk_total = chunk_count.load(Ordering::SeqCst);
+                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
+                    let ft = first_token_ms.load(Ordering::SeqCst);
+                    let lat = start.elapsed().as_millis() as i64;
+                    let diagnostic = build_stream_diagnostic(
+                        "stream_read",
+                        Some(&err),
+                        &entry,
+                        &upstream_url,
+                        status_code,
+                        &response_headers,
+                        chunk_total,
+                        byte_total,
+                        sse_buffer.len(),
+                        ft,
+                        lat,
+                    );
+                    let error_message = format!("Stream error: {err}\n{diagnostic}");
                     let attempt_path = attempt_path_with_current(
                         &prior_attempts,
                         &entry,
@@ -552,8 +631,6 @@ fn build_streaming_response(
                     let rm2 = requested_model.clone();
                     let pt = prompt_tokens.load(Ordering::SeqCst);
                     let ct = completion_tokens.load(Ordering::SeqCst);
-                    let ft = first_token_ms.load(Ordering::SeqCst);
-                    let lat = start.elapsed().as_millis() as i64;
                     tokio::spawn(async move {
                         log_usage(
                             &db2, &ah2, ak2.as_ref(), &e2, &rm2,
@@ -582,6 +659,21 @@ fn build_streaming_response(
                         true,
                         None,
                     );
+                    let chunk_total = chunk_count.load(Ordering::SeqCst);
+                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
+                    let stream_summary = build_stream_diagnostic(
+                        "stream_complete",
+                        None,
+                        &entry,
+                        &upstream_url,
+                        status_code,
+                        &response_headers,
+                        chunk_total,
+                        byte_total,
+                        sse_buffer.len(),
+                        first_token_ms.load(Ordering::SeqCst),
+                        start.elapsed().as_millis() as i64,
+                    );
                     let db2 = db.clone();
                     let ah2 = app_handle.clone();
                     let ak2 = access_key.clone();
@@ -601,7 +693,7 @@ fn build_streaming_response(
                         log_usage(
                             &db2, &ah2, ak2.as_ref(), &e2, &rm2,
                             true, pt, ct, ft, lat,
-                            sc, true, None,
+                            sc, true, Some(stream_summary.as_str()),
                             Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                         );
                         spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);

@@ -579,6 +579,60 @@ api-switch/
 | 12 | **侧边栏使用指南** | 系统设置下方新增"使用指南"菜单，外链 GitHub GUIDE.md |
 | 13 | **API 管理光标** | 拖拽手柄改为 `cursor-pointer`，避免 Windows 上 `cursor-grab` 锯齿 |
 
+---
+
+## 10. 待办与预留功能
+
+### 10.1 通用限额查询接口 (已实现)
+
+**目标**：统一查询多个供应商的 Token Plan / 限额信息，支持 Kimi、智谱、MiniMax 等国产 Coding Plan 供应商。
+
+**设计**：
+- 输入：`baseUrl` + `apiKey`
+- 输出：统一的 `LimitQueryResult` 结构
+- 自动识别供应商并路由到对应 API
+
+**返回结构**：
+```ts
+export interface LimitQueryResult {
+  provider: string; // "kimi" | "zhipu" | "minimax_cn" | "minimax_global"
+  credentialStatus: "valid" | "expired" | "not_found" | "parse_error";
+  credentialMessage: string | null;
+  success: boolean;
+  tiers: LimitTier[];
+  error: string | null;
+  queriedAt: number | null;
+  raw: unknown | null; // 原始响应，便于扩展
+}
+
+export interface LimitTier {
+  name: string; // "five_hour" | "weekly_limit" 等
+  utilization: number; // 0-100 百分比
+  resetsAt: string | null; // ISO 8601 重置时间
+}
+```
+
+**已支持供应商**：
+| 供应商 | 识别 URL | 限额接口 |
+|--------|---------|----------|
+| Kimi For Coding | `api.kimi.com/coding` | `GET /coding/v1/usages` |
+| 智谱 GLM | `bigmodel.cn` / `api.z.ai` | `GET /api/monitor/usage/quota/limit` |
+| MiniMax 国内 | `api.minimaxi.com` | `GET /v1/api/openplatform/coding_plan/remains` |
+| MiniMax 国际 | `api.minimax.io` | `GET /v1/api/openplatform/coding_plan/remains` |
+
+**实现状态**：
+- [x] Rust 后端实现 (`src-tauri/src/commands/limit.rs`)
+- [x] Tauri command 注册 (`query_limit`)
+- [x] TypeScript 类型定义
+- [ ] 前端 UI 集成（待需求明确）
+
+**扩展点**：
+- 新增供应商只需在 `detect_coding_plan_provider()` 添加 URL 规则
+- 新增供应商查询函数 `query_xxx()` 后在 `query_limit_by_url()` 路由
+- `raw` 字段保留原始响应，方便后续调试或提取更多字段
+
+---
+
 ### 2026-04-26 — 托盘菜单同步刷新修复（v0.2.0-dev）
 
 API 管理页排序/开关/创建模型、Channel 选择/更新/删除后，都会刷新系统托盘菜单。

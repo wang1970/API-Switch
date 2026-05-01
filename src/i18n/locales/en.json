@@ -14,7 +14,7 @@
   },
   "apiPool": {
     "title": "API Management",
-    "description": "Manage the final exposed models with channel import and manual fallback entry.",
+    "description": "Manage proxy models in one place with import and manual backfill (Shift+Click: enable/disable all, Ctrl+Click: pin to top).",
     "empty": "No API entries yet. Add a channel and select models first.",
     "addApi": "Add API",
     "addModel": "Add Model",

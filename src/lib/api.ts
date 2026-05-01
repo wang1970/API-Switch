@@ -17,6 +17,7 @@ import type {
   DashboardFilter,
   AppSettings,
   ProxyStatus,
+  LimitQueryResult,
 } from "../types";
 
 // --- Channel ---
@@ -121,6 +122,12 @@ export async function setUserEnvVars(vars: { key: string; value: string }[]): Pr
 
 export async function getCliData(): Promise<unknown | null> {
   return invoke("get_cli_data");
+}
+
+// --- Limit Query ---
+
+export async function queryLimit(baseUrl: string, apiKey: string): Promise<LimitQueryResult> {
+  return invoke("query_limit", { baseUrl, apiKey });
 }
 
 // --- Access Keys ---
