@@ -212,6 +212,7 @@ export interface AppSettings {
   listen_port: number;
   access_key_required: boolean;
   circuit_failure_threshold: number;
+  proxy_connect_timeout_secs: number;
   circuit_recovery_secs: number;
   circuit_disable_codes: string;
   circuit_retry_codes: string;
@@ -229,6 +230,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   listen_port: 9090,
   access_key_required: false,
   circuit_failure_threshold: 3,
+  proxy_connect_timeout_secs: 30,
   circuit_recovery_secs: 600,
   circuit_disable_codes: "401,403,410",
   circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599",

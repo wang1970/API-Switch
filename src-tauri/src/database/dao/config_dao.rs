@@ -9,6 +9,7 @@ pub struct AppSettings {
     pub listen_port: i32,
     pub access_key_required: bool,
     pub circuit_failure_threshold: i32,
+    pub proxy_connect_timeout_secs: u64,
     pub circuit_recovery_secs: i64,
     pub circuit_disable_codes: String,
     pub circuit_retry_codes: String,
@@ -28,6 +29,7 @@ impl Default for AppSettings {
             listen_port: 9090,
             access_key_required: false,
             circuit_failure_threshold: 3,
+            proxy_connect_timeout_secs: 30,
             circuit_recovery_secs: 300,
             locale: "zh".to_string(),
             theme: "light".to_string(),
@@ -66,7 +68,10 @@ impl Database {
             settings.access_key_required = v == "1";
         }
         if let Some(v) = kv.get("circuit_failure_threshold") {
-            settings.circuit_failure_threshold = v.parse().unwrap_or(1);
+            settings.circuit_failure_threshold = v.parse().unwrap_or(3);
+        }
+        if let Some(v) = kv.get("proxy_connect_timeout_secs") {
+            settings.proxy_connect_timeout_secs = v.parse().unwrap_or(30);
         }
         if let Some(v) = kv.get("circuit_recovery_secs") {
             settings.circuit_recovery_secs = v.parse().unwrap_or(300);
@@ -122,6 +127,10 @@ impl Database {
             (
                 "circuit_failure_threshold",
                 &updates.circuit_failure_threshold.to_string(),
+            ),
+            (
+                "proxy_connect_timeout_secs",
+                &updates.proxy_connect_timeout_secs.to_string(),
             ),
             (
                 "circuit_recovery_secs",

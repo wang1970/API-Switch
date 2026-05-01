@@ -53,9 +53,27 @@ const removableSuffixes = [
   "online",
 ];
 
+// Providers whose metadata (especially release_date) is authoritative.
+// Third-party aggregators (302ai, nano-gpt, jiekou, helicone, llmgateway, etc.)
+// often have incorrect or imprecise dates and should not win score ties.
+const AUTHORITATIVE_PROVIDERS = new Set([
+  "openai", "anthropic", "google", "google-vertex",
+  "deepseek", "alibaba", "alibaba-cn",
+  "minimax", "minimax-cn",
+  "xai", "mistral", "meta",
+  "zhipuai", "zai",
+]);
+
 function scoreModel(model: CatalogModel): number {
   let score = 0;
-  if (model.release_date) score += 2;
+  // Strongly prefer official/authoritative providers for correct metadata.
+  if (model.provider_id && AUTHORITATIVE_PROVIDERS.has(model.provider_id)) score += 4;
+  if (model.family) score += 3;
+  if (model.release_date) {
+    score += 2;
+    // Prefer precise dates (YYYY-MM-DD) over month-only (YYYY-MM)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(model.release_date)) score += 1;
+  }
   if (model.last_updated) score += 1;
   if (model.reasoning) score += 1;
   if (model.tool_call) score += 1;

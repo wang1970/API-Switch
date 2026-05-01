@@ -9,6 +9,17 @@ use serde_json::json;
 use std::time::Instant;
 use tauri::{Manager, State};
 
+fn refresh_tray_if_enabled(app: &tauri::AppHandle) {
+    if crate::EXPERIMENTAL_LAZY_TRAY_REFRESH {
+        return;
+    }
+    if let Ok(new_menu) = crate::build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct TestResult {
     pub status: String,
@@ -55,11 +66,7 @@ pub fn toggle_entry(app: tauri::AppHandle, state: State<'_, AppState>, id: Strin
             counts.remove(&id);
         }
     }
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -70,11 +77,7 @@ pub fn reorder_entries(
     ordered_ids: Vec<String>,
 ) -> Result<(), AppError> {
     state.db.reorder_entries(&ordered_ids)?;
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -85,11 +88,7 @@ pub fn delete_entry(
     id: String,
 ) -> Result<(), AppError> {
     state.db.delete_entry(&id)?;
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -111,6 +110,7 @@ pub fn create_entry(
             &params.model_meta_zh,
             &params.model_meta_en,
         )?;
+    let _ = state.db.add_channel_model_if_missing(&params.channel_id, &params.model, entry.owned_by.as_deref());
     if let Ok(new_menu) = build_tray_menu(&app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));
@@ -222,11 +222,7 @@ pub async fn test_entry_latency(
 }
 
 fn rebuild_tray(app: &tauri::AppHandle) {
-    if let Ok(new_menu) = crate::build_tray_menu(app) {
-        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(app);
 }
 
 #[tauri::command]

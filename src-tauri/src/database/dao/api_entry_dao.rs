@@ -141,7 +141,6 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp();
-
         conn.execute(
             "INSERT INTO api_entries (
                 id, channel_id, model, display_name, sort_index, enabled,
@@ -408,7 +407,7 @@ impl Database {
     }
 
     /// Get all API pool entries for listing models / direct model routing.
-    /// Includes disabled entries — entry.enabled only means "enter AUTO", not "usable".
+    /// Includes disabled entries; entry.enabled only means "enter AUTO", not "usable".
     pub fn get_entries_for_routing(&self) -> Result<Vec<ApiEntry>, AppError> {
         let conn = lock_conn!(self.conn);
         let sql = format!("{ENTRY_SELECT_WITH_CHANNEL} ORDER BY e.sort_index, e.created_at");

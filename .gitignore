@@ -23,6 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# Personal planning notes
+GENERIC_AGENT_FLOATING_AGENT_PLAN.md
+GENERIC_AGENT_IFRAME_PLAN.md
+GENERIC_AGENT_PRODUCT_DISCUSSION.md
+
 # Rust / Tauri
 src-tauri/target
 

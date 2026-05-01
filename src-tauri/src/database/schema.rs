@@ -137,6 +137,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("listen_port", "9090"),
         ("access_key_required", "0"),
         ("circuit_failure_threshold", "3"),
+        ("proxy_connect_timeout_secs", "30"),
         ("circuit_recovery_secs", "300"),
         ("circuit_disable_codes", "401,403,410"),
         ("circuit_retry_codes", "100-199,300-399,401-407,409-499,500-503,505-523,525-599"),

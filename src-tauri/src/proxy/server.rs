@@ -32,6 +32,7 @@ pub struct ProxyState {
 /// HTTP proxy server
 pub struct ProxyServer {
     port: i32,
+    connect_timeout_secs: u64,
     state: ProxyState,
     shutdown_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
 }
@@ -44,6 +45,10 @@ impl ProxyServer {
         app_handle: tauri::AppHandle,
         failure_counts: Arc<RwLock<HashMap<String, u32>>>,
     ) -> Self {
+        let connect_timeout_secs = settings
+            .try_read()
+            .map(|settings| settings.proxy_connect_timeout_secs.clamp(1, 300))
+            .unwrap_or(30);
         let state = ProxyState {
             db,
             settings,
@@ -51,7 +56,7 @@ impl ProxyServer {
             failure_counts,
             app_handle,
             http_client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(15))
+                .connect_timeout(Duration::from_secs(connect_timeout_secs))
                 .read_timeout(Duration::from_secs(120))
                 .gzip(true)
                 .build()
@@ -60,6 +65,7 @@ impl ProxyServer {
 
         Self {
             port,
+            connect_timeout_secs,
             state,
             shutdown_tx: Arc::new(RwLock::new(None)),
         }
@@ -92,7 +98,10 @@ impl ProxyServer {
             .await
             .map_err(|e| format!("Failed to bind: {e}"))?;
 
-        log::info!("Proxy server started on {addr}");
+        log::info!(
+            "Proxy server started on {addr}, connect_timeout={}s",
+            self.connect_timeout_secs
+        );
 
         *self.shutdown_tx.write().await = Some(shutdown_tx);
 

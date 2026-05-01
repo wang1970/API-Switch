@@ -4,6 +4,17 @@ use crate::AppState;
 use serde::Deserialize;
 use tauri::{Manager, State};
 
+fn refresh_tray_if_enabled(app: &tauri::AppHandle) {
+    if crate::EXPERIMENTAL_LAZY_TRAY_REFRESH {
+        return;
+    }
+    if let Ok(new_menu) = crate::build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+}
+
 const GITHUB_REPO: &str = "wang1970/API-Switch";
 
 #[derive(Deserialize)]
@@ -107,10 +118,6 @@ pub async fn update_settings(app: tauri::AppHandle, state: State<'_, AppState>, 
     let settings = refresh_settings_l1(&state).await?;
     sync_autostart(&settings);
     // Rebuild tray menu to reflect updated sort_mode
-    if let Ok(new_menu) = crate::build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }

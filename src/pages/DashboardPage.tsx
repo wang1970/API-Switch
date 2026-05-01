@@ -39,6 +39,30 @@ type SeriesPoint = {
   [key: string]: string | number;
 };
 
+function formatCompactNumber(value: number): string {
+  const abs = Math.abs(value);
+  const units = [
+    { value: 1_000_000_000_000, suffix: "T" },
+    { value: 1_000_000_000, suffix: "B" },
+    { value: 1_000_000, suffix: "M" },
+    { value: 1_000, suffix: "K" },
+  ];
+
+  for (const unit of units) {
+    if (abs >= unit.value) {
+      const scaled = value / unit.value;
+      const digits = Math.abs(scaled) >= 10 ? 0 : 1;
+      return `${scaled.toFixed(digits).replace(/\.0$/, "")}${unit.suffix}`;
+    }
+  }
+
+  return String(value);
+}
+
+function formatFullNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
 function buildSeriesData(
   items: Array<{ time: string; model: string; value: number }> | undefined,
   topN = 8,
@@ -137,9 +161,12 @@ export function DashboardPage() {
     const now = Date.now() / 1000;
     let start: number;
     switch (range) {
-      case "today":
-        start = now - 86400;
+      case "today": {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        start = Math.floor(today.getTime() / 1000);
         break;
+      }
       case "7d":
         start = now - 7 * 86400;
         break;
@@ -215,8 +242,8 @@ export function DashboardPage() {
                   <BarChart data={consumptionSeries.data}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
-                    <YAxis />
-                    <Tooltip />
+                    <YAxis tickFormatter={(value) => formatCompactNumber(Number(value))} />
+                    <Tooltip formatter={(value) => formatFullNumber(Number(value))} />
                     <Legend />
                     {consumptionSeries.series.map((series, index) => (
                       <Bar

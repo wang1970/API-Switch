@@ -197,6 +197,44 @@ impl Database {
         Ok(())
     }
 
+    pub fn add_channel_model_if_missing(&self, channel_id: &str, model: &str, owned_by: Option<&str>) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        let now = chrono::Utc::now().timestamp();
+
+        let (available_models_str, selected_models_str): (String, String) = conn.query_row(
+            "SELECT available_models, selected_models FROM channels WHERE id = ?1",
+            [channel_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        let mut available_models: Vec<ModelInfo> = serde_json::from_str(&available_models_str).unwrap_or_default();
+        let mut selected_models: Vec<String> = serde_json::from_str(&selected_models_str).unwrap_or_default();
+
+        if !available_models.iter().any(|m| m.id == model || m.name == model) {
+            available_models.push(ModelInfo {
+                id: model.to_string(),
+                name: model.to_string(),
+                owned_by: owned_by.map(str::to_string),
+            });
+        }
+
+        if !selected_models.iter().any(|m| m == model) {
+            selected_models.push(model.to_string());
+        }
+
+        let available_json = serde_json::to_string(&available_models)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let selected_json = serde_json::to_string(&selected_models)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        conn.execute(
+            "UPDATE channels SET available_models=?1, selected_models=?2, updated_at=?3 WHERE id=?4",
+            rusqlite::params![available_json, selected_json, now, channel_id],
+        )?;
+
+        Ok(())
+    }
+
     pub fn get_channel(&self, id: &str) -> Result<Channel, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(

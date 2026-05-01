@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -58,6 +57,11 @@ function formatReleaseDate(value?: string) {
   const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (compact) {
     return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  }
+  // Normalize month-only format: "2026-04" → "2026-04-01"
+  const monthOnly = value.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnly) {
+    return `${value}-01`;
   }
   return value;
 }
@@ -243,13 +247,9 @@ export function ChannelPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>{t("channel.listTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-hidden">
-            <table className="w-full table-fixed text-sm">
+      <div className="border rounded-lg overflow-hidden">
+        <div className="overflow-x-hidden">
+          <table className="w-full table-fixed text-sm">
               <colgroup>
                 <col className="w-[18%]" />
                 <col className="w-24" />
@@ -303,16 +303,15 @@ export function ChannelPage() {
                   />
                 ))}
               </tbody>
-            </table>
-          </div>
+          </table>
+        </div>
 
-          {!(channels || []).length && (
-            <div className="flex h-48 items-center justify-center text-muted-foreground">
-              {t("common.noData")}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {!(channels || []).length && (
+          <div className="flex h-48 items-center justify-center text-muted-foreground">
+            {t("common.noData")}
+          </div>
+        )}
+      </div>
 
       <ChannelEditorDialog
         open={showEdit}
@@ -858,7 +857,7 @@ function ChannelEditorDialog({
     : availableModels;
 
   const canFetchModels = !!(form.name && form.base_url && form.api_key) && !probingUrl && urlProbe?.reachable !== false;
-  const canSave = !!canFetchModels;
+  const canSave = !!(form.name && form.base_url && form.api_key);
 
   const handleClose = () => {
     queryClient.invalidateQueries({ queryKey: ["channels"] });

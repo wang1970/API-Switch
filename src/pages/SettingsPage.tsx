@@ -130,6 +130,20 @@ export function SettingsPage() {
               onChange={(e) => update("circuit_failure_threshold", parseInt(e.target.value) || 1)}
             />
           </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>{t("settings.circuit.connectTimeout")}</Label>
+              <p className="text-xs text-muted-foreground">{t("settings.circuit.connectTimeoutDesc")}</p>
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={300}
+              className="w-32"
+              value={s.proxy_connect_timeout_secs}
+              onChange={(e) => update("proxy_connect_timeout_secs", Math.min(300, Math.max(1, parseInt(e.target.value) || 30)))}
+            />
+          </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>{t("settings.circuit.recovery")}</Label>

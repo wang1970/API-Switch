@@ -260,10 +260,16 @@ impl Database {
         end_time: Option<i64>,
     ) -> Result<DashboardStats, AppError> {
         let conn = lock_conn!(self.conn);
-        let now = chrono::Utc::now().timestamp();
-        let today_start = now - (now % 86400); // Start of today
+        let now = chrono::Local::now();
+        let now_ts = now.timestamp();
+        let today_start = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .and_then(|start| start.and_local_timezone(chrono::Local).single())
+            .map(|start| start.timestamp())
+            .unwrap_or_else(|| now_ts - (now_ts % 86400)); // Fallback to UTC day boundary if local midnight is ambiguous.
         let effective_start = start_time.unwrap_or(0);
-        let effective_end = end_time.unwrap_or(now);
+        let effective_end = end_time.unwrap_or(now_ts);
 
         // Total stats
         let (total_requests, total_prompt, total_completion, total_success, total_latency): (i64, i64, i64, i64, i64) =
@@ -285,7 +291,7 @@ impl Database {
         )?;
 
         // RPM/TPM (last 60 seconds)
-        let minute_ago = now - 60;
+        let minute_ago = now_ts - 60;
         let (rpm, tpm): (f64, f64) = conn.query_row(
             "SELECT COUNT(*) as rpm, COALESCE(SUM(prompt_tokens) + SUM(completion_tokens), 0) as tpm
              FROM usage_logs WHERE created_at >= ?1",

@@ -21,6 +21,7 @@ pub struct AppState {
 }
 
 pub(crate) const TRAY_ID: &str = "api-switch-tray";
+pub(crate) const EXPERIMENTAL_LAZY_TRAY_REFRESH: bool = false;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -75,6 +76,23 @@ pub fn run() {
                 .menu(&tray_menu)
                 .show_menu_on_left_click(true)
                 .on_tray_icon_event(|tray, event| match event {
+                    tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Right,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } => {
+                        if EXPERIMENTAL_LAZY_TRAY_REFRESH {
+                            let app = tray.app_handle().clone();
+                            tauri::async_runtime::spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                                    if let Ok(new_menu) = build_tray_menu(&app) {
+                                        let _ = tray.set_menu(Some(new_menu));
+                                    }
+                                }
+                            });
+                        }
+                    }
                     tauri::tray::TrayIconEvent::DoubleClick { .. } => {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
                             let _ = window.show();

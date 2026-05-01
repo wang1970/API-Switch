@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listEntries, toggleEntry, reorderEntries, listChannels, createEntry, testEntryLatency, deleteEntry, updateSettings, backfillEntryCatalogMeta, getSettings } from "@/lib/api";
-import type { ApiEntry, Channel, ModelSortMode } from "@/types";
+import { DEFAULT_SETTINGS, type ApiEntry, type Channel, type ModelSortMode } from "@/types";
 import { cn, formatResponseMs, parseResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from "@/lib/modelsCatalog";
@@ -63,7 +63,33 @@ function formatReleaseDate(value?: string) {
   if (compact) {
     return `${compact[1]}-${compact[2]}-${compact[3]}`;
   }
+  // Normalize month-only format: "2026-04" → "2026-04-01"
+  const monthOnly = value.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnly) {
+    return `${value}-01`;
+  }
   return value;
+}
+
+/** Parse release_date to epoch seconds for sorting, matching backend parse_release_date.
+ * Supports: YYYY-MM-DD, YYYY-MM, YYYYMMDD. Returns null if unparseable. */
+function parseReleaseDateForSort(entry: ApiEntry): number | null {
+  const raw = entry.release_date?.trim();
+  if (!raw) return null;
+
+  // Try YYYY-MM-DD
+  const m1 = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m1) return new Date(raw).getTime();
+
+  // Try YYYYMMDD
+  const m2 = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m2) return new Date(`${m2[1]}-${m2[2]}-${m2[3]}`).getTime();
+
+  // Try YYYY-MM (append -01)
+  const m3 = raw.match(/^(\d{4})-(\d{2})$/);
+  if (m3) return new Date(`${raw}-01`).getTime();
+
+  return null;
 }
 
 type CatalogDisplayMeta = {
@@ -381,6 +407,8 @@ export function ApiPoolPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
+  // sortMode is driven by backend settings; localStorage is only a fallback
+  // before the first settings response arrives.
   const [sortMode, setSortMode] = useState<ModelSortMode>(() => {
     const saved = localStorage.getItem("api-switch-sort-mode");
     if (saved === "latest" || saved === "fastest" || saved === "custom") return saved;
@@ -416,19 +444,18 @@ export function ApiPoolPage() {
     queryFn: getSettings,
   });
 
+  // Always sync sortMode from backend settings once available.
   useEffect(() => {
-    const saved = localStorage.getItem("api-switch-sort-mode");
-    if (!saved && settings?.default_sort_mode) {
+    if (settings?.default_sort_mode === "latest" || settings?.default_sort_mode === "fastest" || settings?.default_sort_mode === "custom") {
       setSortMode(settings.default_sort_mode);
     }
   }, [settings?.default_sort_mode]);
 
-  // Pre-compute catalog fallback only for entries missing DB metadata.
+  // Pre-compute catalog metadata for all entries (used for fallback display and backfill normalization).
   const catalogMap = useMemo(() => {
     const map = new Map<string, CatalogDisplayMeta>();
     for (const entry of (entries || [])) {
-      const needsFallback = !entry.provider_logo || !entry.release_date || !entry.model_meta_zh || !entry.model_meta_en;
-      if (needsFallback && !map.has(entry.model)) {
+      if (!map.has(entry.model)) {
         map.set(entry.model, buildCatalogDisplayMeta(entry.model));
       }
     }
@@ -442,10 +469,10 @@ export function ApiPoolPage() {
         if (!meta) return null;
         const next = {
           id: entry.id,
-          provider_logo: entry.provider_logo || meta.logo,
-          release_date: entry.release_date || meta.releaseDate,
-          model_meta_zh: entry.model_meta_zh || meta.modelMetaZh,
-          model_meta_en: entry.model_meta_en || meta.modelMetaEn,
+          provider_logo: meta.logo || entry.provider_logo || "",
+          release_date: meta.releaseDate || entry.release_date || "",
+          model_meta_zh: meta.modelMetaZh || entry.model_meta_zh || "",
+          model_meta_en: meta.modelMetaEn || entry.model_meta_en || "",
         };
         const changed =
           next.provider_logo !== (entry.provider_logo || "") ||
@@ -469,31 +496,48 @@ export function ApiPoolPage() {
     });
   }, [entries, catalogMap, queryClient]);
 
+  // Sort entries to match backend router.rs apply_sort_mode logic.
+  // Backend sorts ALL entries by the chosen metric without enabled/disabled split.
+  // Frontend keeps enabled above disabled for display clarity, but applies the same
+  // metric-based sort within each group so the order reflects actual routing priority.
   const sorted = useMemo(() => {
     const list = [...(entries || [])];
-
-    if (sortMode === "latest") {
-      return list.sort((a, b) => {
-        const dateA = a.release_date || catalogMap.get(a.model)?.releaseDate || "";
-        const dateB = b.release_date || catalogMap.get(b.model)?.releaseDate || "";
-        return dateB.localeCompare(dateA);
-      });
-    }
-
     const enabled = list.filter((e) => e.enabled);
     const disabled = list.filter((e) => !e.enabled);
 
-    if (sortMode === "fastest") {
-      enabled.sort((a, b) => {
-        const msA = parseResponseMs(a.response_ms) ?? Infinity;
-        const msB = parseResponseMs(b.response_ms) ?? Infinity;
-        return msA - msB;
-      });
-      disabled.sort((a, b) => a.sort_index - b.sort_index);
-    } else {
-      enabled.sort((a, b) => a.sort_index - b.sort_index);
-      disabled.sort((a, b) => a.sort_index - b.sort_index);
-    }
+    const sortGroup = (group: ApiEntry[]) => {
+      switch (sortMode) {
+        case "latest": {
+          // Match backend sort_by_release_date: date desc, fallback to sort_index
+          group.sort((a, b) => {
+            const dateA = parseReleaseDateForSort(a);
+            const dateB = parseReleaseDateForSort(b);
+            if (dateA && dateB) return dateB - dateA; // newest first
+            if (dateA) return -1;
+            if (dateB) return 1;
+            return a.sort_index - b.sort_index;
+          });
+          break;
+        }
+        case "fastest": {
+          // Match backend sort_by_latency: response_ms asc, no data goes last
+          group.sort((a, b) => {
+            const msA = parseResponseMs(a.response_ms) ?? Infinity;
+            const msB = parseResponseMs(b.response_ms) ?? Infinity;
+            return msA - msB;
+          });
+          break;
+        }
+        default: {
+          // custom: sort by sort_index
+          group.sort((a, b) => a.sort_index - b.sort_index);
+          break;
+        }
+      }
+    };
+
+    sortGroup(enabled);
+    sortGroup(disabled);
 
     return [...enabled, ...disabled];
   }, [entries, sortMode, catalogMap]);
@@ -594,7 +638,10 @@ export function ApiPoolPage() {
     setSortMode(mode);
     setLocalOrder(null);
     localStorage.setItem("api-switch-sort-mode", mode);
-    updateSettings({ default_sort_mode: mode } as any).then(() => {
+    // Use queryClient.getQueryData to get the latest settings without relying on stale closure
+    const currentSettings = queryClient.getQueryData(["settings"]);
+    const merged = { ...DEFAULT_SETTINGS, ...currentSettings, default_sort_mode: mode };
+    updateSettings(merged).then(() => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     });
   }, [queryClient]);
@@ -722,14 +769,14 @@ export function ApiPoolPage() {
           ) : null}
         </div>
       </div>
-      <div className="flex items-center justify-end mt-2 mb-1">
-        <div className="flex items-center rounded-md border">
+      <div className="mt-2 -mx-px w-[calc(100%+2px)] rounded-t-md border border-b-0 bg-background">
+        <div className="flex w-full items-center px-0 py-0">
           {(["custom", "latest", "fastest"] as ModelSortMode[]).map((mode) => (
             <Button
               key={mode}
               size="sm"
               variant={sortMode === mode ? "default" : "ghost"}
-              className="h-7 rounded-none first:rounded-l-md last:rounded-r-md px-2.5 text-xs"
+                className="h-6 flex-1 rounded-none first:rounded-tl-md last:rounded-tr-md px-3 text-xs"
               onClick={() => handleSortModeChange(mode)}
             >
               {t(`apiPool.sort.${mode}`)}
@@ -738,8 +785,8 @@ export function ApiPoolPage() {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-6">
+      <Card className="rounded-t-none">
+        <CardContent className="p-4 pt-4">
           {!entries?.length ? (
             <div className="flex h-48 items-center justify-center text-muted-foreground">
               {t("apiPool.empty")}

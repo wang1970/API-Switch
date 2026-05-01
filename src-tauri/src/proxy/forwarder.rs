@@ -680,6 +680,9 @@ fn append_and_parse_sse(
 }
 
 fn refresh_tray(app_handle: &tauri::AppHandle) {
+    if crate::EXPERIMENTAL_LAZY_TRAY_REFRESH {
+        return;
+    }
     if let Ok(new_menu) = build_tray_menu(app_handle) {
         if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));
@@ -901,7 +904,7 @@ fn log_usage(
 ) {
     let log_type = if success { 2 } else { 5 };
     let content = error_message.unwrap_or("");
-    let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("auto");
+    let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE");
     let use_time = ((latency_ms as f64) / 1000.0).ceil() as i64;
     let other = serde_json::json!({
         "requested_model": requested_model,
@@ -917,7 +920,7 @@ fn log_usage(
     let _ = db.insert_usage_log(
         log_type, content,
         access_key.map(|ak| ak.id.as_str()),
-        access_key.map(|ak| ak.name.as_str()).unwrap_or("auto"),
+        access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE"),
         token_name, &entry.id, &entry.channel_id,
         entry.channel_name.as_deref().unwrap_or("unknown"),
         &entry.model, requested_model, 0, is_stream,

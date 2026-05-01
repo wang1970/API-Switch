@@ -7,6 +7,17 @@ use crate::build_tray_menu;
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+fn refresh_tray_if_enabled(app: &tauri::AppHandle) {
+    if crate::EXPERIMENTAL_LAZY_TRAY_REFRESH {
+        return;
+    }
+    if let Ok(new_menu) = crate::build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+            let _ = tray.set_menu(Some(new_menu));
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct ModelCatalogMetaInput {
     pub model: String,
@@ -124,22 +135,14 @@ pub fn update_channel(app: tauri::AppHandle, state: State<'_, AppState>, params:
         params.enabled,
         params.notes.as_deref(),
     )?;
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     state.db.get_channel(&params.id)
 }
 
 #[tauri::command]
 pub fn delete_channel(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), AppError> {
     state.db.delete_channel(&id)?;
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -630,11 +633,7 @@ pub fn select_models(
         })
         .collect();
     state.db.sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
-    if let Ok(new_menu) = build_tray_menu(&app) {
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(&app);
     Ok(())
 }
 

@@ -23,9 +23,9 @@
     "cooldownInline": "(冷却 {{time}})",
     "filterChannel": "筛选渠道",
     "sort": {
-      "latest": "最新",
-      "fastest": "最快",
-      "custom": "自定义"
+      "latest": "最新模型",
+      "fastest": "最快模型",
+      "custom": "指定模型"
     },
     "cooldownRemaining": "冷却中，剩余 {{time}}",
     "channel": "渠道",
@@ -276,6 +276,8 @@
     "circuit": {
       "title": "熔断机制",
       "threshold": "连续失败关闭次数",
+      "connectTimeout": "连接超时(秒)",
+      "connectTimeoutDesc": "代理连接上游 API 的超时时间，修改后需重启代理生效",
       "recovery": "冷却恢复时间(秒)",
       "disableCodes": "自动禁用状态码",
       "disableDesc": "匹配到该状态码时立即返回错误，不重试、不熔断。支持填写单个状态码或范围（含首尾），使用逗号分隔",
